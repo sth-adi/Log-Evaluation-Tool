@@ -1,0 +1,19 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+node_modules/
+frontend/dist/
+
+# local data and release artefacts
+data/
+vendor/
+release/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/

@@ -1,0 +1,34 @@
+/* Design tokens. Source of truth: design/MASTER.md */
+:root {
+  --black: #000000;
+  --graphite: #171717;
+  --steel: #242424;
+  --rule: #333333;
+  --chalk: #f2f2f2;
+  --ash: #9a9a9a;
+  --red: #e11d2a; /* placeholder: swap for the official UWE FS red */
+
+  --ice: #ffb020;
+  --motor: #38c8f0;
+  --regen: #3ddc84;
+  --pack: #b79bff;
+
+  --font: "Barlow Semi Condensed", system-ui, sans-serif;
+  --font-title: "Barlow Condensed", "Barlow Semi Condensed", system-ui, sans-serif;
+
+  --t11: 11px;
+  --t12: 12px;
+  --t13: 13px;
+  --t15: 15px;
+  --t18: 18px;
+  --t28: 28px;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}
