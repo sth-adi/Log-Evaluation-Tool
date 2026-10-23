@@ -19,9 +19,11 @@ The backend has automated tests. The Windows scripts and the browser UI have not
 Needs Python 3.10+ and, for the first build, Node.js 20+.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
-powershell -ExecutionPolicy Bypass -File scripts\run.ps1
+.\scripts\setup.ps1
+.\scripts\run.ps1
 ```
+
+If PowerShell says running scripts is disabled on your account, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once and try again.
 
 The tool opens at http://127.0.0.1:8000. Use **Import logs**, or drop CSV files onto the window. To try it without real logs:
 

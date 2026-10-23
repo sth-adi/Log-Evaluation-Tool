@@ -1,6 +1,6 @@
 # Run on a machine WITH internet access to make a zip that installs on a locked-down laptop.
 # The zip contains the built frontend and Python wheels for Windows, so setup.ps1 needs no network.
-#   powershell -ExecutionPolicy Bypass -File scripts\build-release.ps1 -PythonVersion 3.12
+#   .\scripts\build-release.ps1 -PythonVersion 3.12
 # Set -PythonVersion to the Python version installed on the TARGET laptop (for example 3.11, 3.12, 3.13).
 param([string]$PythonVersion = "3.12")
 $ErrorActionPreference = "Stop"

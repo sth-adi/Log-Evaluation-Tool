@@ -1,4 +1,4 @@
-# One-time setup on Windows. Run from anywhere:  powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+# One-time setup on Windows. From the repo root:  .\scripts\setup.ps1
 # Works online (installs from PyPI/npm) or offline (uses vendor\wheels and a prebuilt frontend\dist
 # from a release zip made by scripts\build-release.ps1).
 $ErrorActionPreference = "Stop"
@@ -42,4 +42,4 @@ if (Test-Path "frontend\dist\index.html") {
 }
 
 Write-Host ""
-Write-Host "Done. Start the tool with:  powershell -ExecutionPolicy Bypass -File scripts\run.ps1"
+Write-Host "Done. Start the tool with:  .\scripts\run.ps1"
