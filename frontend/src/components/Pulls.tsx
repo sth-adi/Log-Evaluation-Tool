@@ -3,7 +3,7 @@ import uPlot from "uplot";
 import { api, type PullRow, type Pulls as PullsData } from "../api";
 import { useStore, type Source } from "../store";
 import { spansDays, stamp } from "../time";
-import { Chart, axis, useFetched } from "./Analysis";
+import { Chart, alignedData, axis, useFetched } from "./Analysis";
 import { formatValue } from "./Lane";
 
 const COLOURS = ["#38c8f0", "#ffb020", "#3ddc84", "#b79bff", "#ff8fb1", "#e8e8e8", "#7fa6ff", "#d6e34a"];
@@ -41,7 +41,6 @@ export function Pulls() {
   const rows: Row[] = useMemo(
     () =>
       data ? ids.flatMap((id) => (data.logs[id]?.pulls ?? []).map((p) => ({ ...p, id: `${id}:${p.n}`, log: id }))) : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [data, ids.join(",")],
   );
   const selected = sel ?? rows.filter((r) => r.loaded !== false).map((r) => r.id);
@@ -62,7 +61,6 @@ export function Pulls() {
   const colourOf = useMemo(() => {
     const order = rows.filter((r) => selected.includes(r.id)).map((r) => r.id);
     return (id: string) => (id === refId ? REF : COLOURS[Math.max(order.indexOf(id), 0) % COLOURS.length]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selected.join(","), refId]);
   const toggle = (id: string) => setSel((cur) => ((cur ?? selected).includes(id) ? (cur ?? selected).filter((x) => x !== id) : [...(cur ?? selected), id]));
   const label = (log: string, n: number) => (sources.length > 1 ? `${tag(sources.find((s) => s.id === log))} #${n}` : `Pull ${n}`);
@@ -90,7 +88,6 @@ export function Pulls() {
         }))
       : [];
     return { power, torque: get("torque"), delta, byChannel: channels.map((ch) => ({ ch, lines: get(ch) })) };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, refId, channels.join(","), sources.length]);
 
   const refPeak = refId ? peaks.get(refId)?.peak_power : undefined;
@@ -99,6 +96,9 @@ export function Pulls() {
   return (
     <section className="analysis laps pulls" aria-label="Pulls">
       <div className="analysis-bar">
+        <details className="opts">
+          <summary>Settings</summary>
+          <div className="opts-body">
         <label className="inline" title="How steadily RPM must climb to count as a pull">
           Sensitivity
           <select value={slope} onChange={(e) => { setSlope(Number(e.target.value)); setSel(null); }}>
@@ -127,6 +127,8 @@ export function Pulls() {
           Effective mass (kg)
           <input type="number" min="1" step="any" value={mass} onChange={(e) => setMass(e.target.value)} placeholder="optional" />
         </label>
+          </div>
+        </details>
         {data && !nothing && (
           <span className="muted small">
             {rows.length} pull{rows.length === 1 ? "" : "s"} found.
@@ -277,7 +279,7 @@ function CurveChart(props: {
   signed?: boolean;
   last?: boolean;
 }) {
-  const data = useMemo(() => [props.x, ...props.laps.map((l) => l.ys)] as unknown as uPlot.AlignedData, [props.x, props.laps]);
+  const data = useMemo(() => alignedData(props.x, props.laps.map((l) => l.ys)), [props.x, props.laps]);
   if (!props.laps.length) return null;
   const fmt = (v: number | null) => (v == null ? "–" : props.signed ? `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}` : formatValue(v));
   return (

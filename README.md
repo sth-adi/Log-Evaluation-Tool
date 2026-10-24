@@ -37,9 +37,13 @@ Every converted or imported log is kept in the **Library** (top bar). Closing a 
 - **CSV files** exported from LifeView: choose them with **Import logs**, or drop them on the window.
 - **Life Racing `.LRD` logs**: choose or drop them the same way. The tool opens each one in LifeView, exports the CSV and imports it, then lays the logs out in start-time order. This needs Windows with LifeView installed and no LifeView window already open, and it takes over the mouse for a few seconds per log (about 10 seconds each), so keep your hands off while it runs. CSV copies are kept in `data/exports`. Machines without LifeView can still import those CSV files. The tool never reads or decrypts `.LRD` files itself; it operates LifeView's own export. See `tools/lifeview/README.md`.
 
+## Finding your way round
+
+The top bar has two modes. **Plots** shows channels over time; **Analyse** opens a list of tools grouped by what you want to find out (one channel, two channels, compare runs, find problems). **Logs** adds files or opens ones you already have, and **More** holds saved views, the report and live data. Settings you rarely change sit behind an **Options** or **Settings** button.
+
 ## Laps
 
-The **Laps** tab turns a track log into lap times and lap-by-lap comparison.
+**Analyse > Laps** turns a track log into lap times and lap-by-lap comparison.
 
 - **Finding laps.** Automatic if the logger records a lap timer or last-lap-time channel. Otherwise choose a beacon signal, a fixed lap length, a lap counter, or type the line-crossing times. The out-lap and in-lap are shown but flagged and left out of "best".
 - **Compare.** Every lap is overlaid on one axis, by distance round the lap or by time into the lap. The top chart shows how far ahead or behind the reference lap (the best, unless you click another lap number) each lap is, at every point of the track. The cursor is shared across charts and the legend shows each lap's live value.
@@ -50,7 +54,7 @@ The **Laps** tab turns a track log into lap times and lap-by-lap comparison.
 - **Numbers.** Sector times (2 to 8 equal-distance sectors), the **ideal lap** built from the best of every sector, and the highest, lowest or average of any channel for each lap.
 - **Hover a chart** and a marker follows on the track map, so you can see where on the circuit a difference happens.
 
-Dyno and bench logs have no start/finish line, so the tab says so instead of guessing.
+Dyno and bench logs have no start/finish line, so the tool says so instead of guessing.
 
 ## Views and downloads
 
@@ -73,7 +77,7 @@ The same file imported twice is recognised and opened rather than stored again.
 
 ## Summary
 
-Analysis > **Summary** gives one row per log and one column per metric, so runs can be compared at a glance. A metric is a channel, an aggregate (highest, lowest, average, median, 95th percentile, spread, first, last, total, or seconds), and an optional **only when** condition written with channel names, for example average `lam1` only when `tps1 > 90`.
+Analyse > **Summary** gives one row per log and one column per metric, so runs can be compared at a glance. A metric is a channel, an aggregate (highest, lowest, average, median, 95th percentile, spread, first, last, total, or seconds), and an optional **only when** condition written with channel names, for example average `lam1` only when `tps1 > 90`.
 
 - **Quick add** suggests common metrics (peak RPM, top speed, average lambda at full throttle, time at full throttle, hottest coolant, lowest battery voltage) for the channels your logs have.
 - **Compare to** picks one log as the baseline and shows how far each other log is from it under every value.
@@ -82,7 +86,7 @@ Analysis > **Summary** gives one row per log and one column per metric, so runs 
 
 ## Heatmap
 
-Analysis > **Heatmap** puts samples from every open log on an x/y grid, for example RPM across and throttle up.
+Analyse > **Heatmap** puts samples from every open log on an x/y grid, for example RPM across and throttle up.
 
 - **Show** the number of samples (where the engine spends its time) or any other channel summarised in each cell: average, highest, lowest or spread. Average lambda over RPM and throttle is the usual engine-map view.
 - **Target** colours cells by how far they are from a value you choose (grey is on target, blue below, red above). **± range** sets how far from the target the colours saturate.
@@ -92,7 +96,7 @@ Analysis > **Heatmap** puts samples from every open log on an x/y grid, for exam
 
 ## Pulls
 
-The **Pulls** tab is for dyno and engine runs, and needs only an `rpm` channel. It finds each pull (RPM climbing steadily, such as a dyno sweep) in every open log, and plots them against RPM instead of time so runs line up.
+**Analyse > Pulls** is for dyno and engine runs, and needs only an `rpm` channel. It finds each pull (RPM climbing steadily, such as a dyno sweep) in every open log, and plots them against RPM instead of time so runs line up.
 
 - **Power and torque** are worked out from how quickly the roller (or car) speeds up, the inertia method. Without a mass they are relative, with the strongest pull set to 100. Enter the **effective mass** (the roller's inertia expressed as a mass, in kg) to get kW and N·m. It leaves out drag and driveline losses, so use it to compare runs rather than as a calibrated figure.
 - **Power against the reference pull** shows, at each RPM, how much stronger or weaker every other pull is. Click a pull number to change the reference. This is the "did the change help?" chart.
@@ -102,7 +106,7 @@ The **Pulls** tab is for dyno and engine runs, and needs only an `rpm` channel. 
 
 ## Live telemetry
 
-The **Live** tab follows data as it arrives: a value and a rolling plot for each channel you pick, over the last 10 to 120 seconds. **Save as log** keeps what the tool holds as an ordinary log, so lap analysis, reports and downloads work on a recorded session.
+**More > Live data** follows data as it arrives: a value and a rolling plot for each channel you pick, over the last 10 to 120 seconds. **Save as log** keeps what the tool holds as an ordinary log, so lap analysis, reports and downloads work on a recorded session.
 
 Choose where the data comes from:
 

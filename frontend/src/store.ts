@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, type LapParams } from "./api";
+import { readJson, writeJson } from "./storage";
 
 export type Channel = {
   name: string;
@@ -58,12 +59,18 @@ export type ConvertView = {
 export type Rule = { name: string; expr: string; min_duration_s: number; merge_gap_s: number };
 
 /** What a saved view remembers. It names channels, not logs, so it fits whichever logs are open. */
+/** Everything under Analyse. */
+export type ToolId = "statistics" | "histogram" | "spectrum" | "scatter" | "heatmap" | "summary" | "events" | "pulls" | "laps";
+const TOOLS: ToolId[] = ["statistics", "histogram", "spectrum", "scatter", "heatmap", "summary", "events", "pulls", "laps"];
+export const isTool = (v: unknown): v is ToolId => typeof v === "string" && (TOOLS as string[]).includes(v);
+
 export type Metric = { id: string; name: string; expr: string; agg: string; where: string; unit: string };
 
 export type ViewPayload = {
   v: 1;
   summary?: Metric[];
-  mode: "plots" | "analysis" | "laps" | "pulls";
+  mode: "plots" | "analyse";
+  tool?: ToolId;
   lanes: string[][];
   lap: { params: LapParams; axis: "distance" | "time" };
 };
@@ -109,8 +116,10 @@ type State = {
   openView: (v: SavedView) => void;
   deleteView: (id: string) => Promise<void>;
   importViewFile: (file: File) => Promise<void>;
-  mode: "plots" | "analysis" | "laps" | "pulls" | "live";
-  setMode: (m: "plots" | "analysis" | "laps" | "pulls" | "live") => void;
+  mode: "plots" | "analyse" | "live";
+  setMode: (m: "plots" | "analyse" | "live") => void;
+  tool: ToolId | null; // the open tool under Analyse, or null for the list of tools
+  setTool: (t: ToolId | null) => void;
   view: [number, number] | null; // null = full extent
   rev: number; // bumped when data on the server changes (offset edits)
   message: { kind: "error" | "info"; text: string } | null;
@@ -148,44 +157,21 @@ function syncLanes(lanes: Lane[], sources: Source[]): Lane[] {
 }
 
 const RECENT_KEY = "let.recent";
-function loadRecent(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 6) : [];
-  } catch {
-    return [];
-  }
-}
-function saveRecent(r: string[]) {
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(r));
-  } catch {
-    /* private window or blocked storage: the list just will not persist */
-  }
-}
+const loadRecent = () => readJson<string[]>(RECENT_KEY, [], (v): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string")).slice(0, 6);
+const saveRecent = (r: string[]) => writeJson(RECENT_KEY, r);
 
 const guessKind = (name: string): Source["kind"] =>
   /hcu/i.test(name) ? "hcu" : /ecu|f88/i.test(name) ? "ecu" : "other";
 
 const METRICS_KEY = "let.metrics";
-function loadMetrics(): Metric[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(METRICS_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((m) => m && typeof m.name === "string" && typeof m.expr === "string") : [];
-  } catch {
-    return [];
-  }
-}
+const isMetric = (m: unknown): m is Metric => !!m && typeof (m as Metric).name === "string" && typeof (m as Metric).expr === "string";
+const loadMetrics = () => readJson<Metric[]>(METRICS_KEY, [], (v): v is Metric[] => Array.isArray(v) && v.every(isMetric));
 
 export const useStore = create<State>((set, get) => ({
   metrics: loadMetrics(),
   setMetrics: (metrics) => {
     set({ metrics });
-    try {
-      localStorage.setItem(METRICS_KEY, JSON.stringify(metrics));
-    } catch {
-      /* private window: the metrics just will not be remembered */
-    }
+    writeJson(METRICS_KEY, metrics);
   },
   lapParams: { method: "auto" },
   setLapParams: (lapParams) => set({ lapParams }),
@@ -200,15 +186,16 @@ export const useStore = create<State>((set, get) => ({
   loadViews: async () => {
     try {
       set({ views: await api.views() });
-    } catch {
-      /* saved views are a convenience; the sources list already reports a dead backend */
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not load your saved views. ${(e as Error).message}` } });
     }
   },
   saveView: async (name) => {
     const s = get();
     const payload: ViewPayload = {
       v: 1,
-      mode: s.mode === "live" ? "plots" : s.mode, // a live screen is not something to come back to
+      mode: s.mode === "analyse" ? "analyse" : "plots", // a live screen is not something to come back to
+      ...(s.mode === "analyse" && s.tool ? { tool: s.tool } : {}),
       lanes: s.lanes.map((l) => [...new Set(l.series.map((x) => x.channel))]),
       lap: { params: s.lapParams, axis: s.lapAxis },
       ...(s.metrics.length ? { summary: s.metrics } : {}),
@@ -234,10 +221,15 @@ export const useStore = create<State>((set, get) => ({
       missing += lane.length - here.length;
       here.forEach((c, i) => get().addChannelAll(c, i > 0));
     }
-    if (Array.isArray(p?.summary)) get().setMetrics(p.summary.filter((m) => m && typeof m.name === "string" && typeof m.expr === "string"));
-    const mode = p?.mode === "analysis" || p?.mode === "laps" || p?.mode === "pulls" ? p.mode : "plots";
+    if (Array.isArray(p?.summary)) get().setMetrics(p.summary.filter(isMetric));
+    // views saved before the tools were gathered under Analyse used "analysis", "laps" and "pulls" as modes
+    const old: Record<string, ToolId> = { analysis: "statistics", laps: "laps", pulls: "pulls" };
+    const savedMode = String(p?.mode);
+    const toTool = savedMode === "analyse" ? (isTool(p?.tool) ? p.tool : null) : (old[savedMode] ?? null);
+    const mode = savedMode === "analyse" || savedMode in old ? "analyse" : "plots";
     set({
       mode,
+      tool: toTool,
       viewsOpen: false,
       ...(p?.lap?.params?.method ? { lapParams: p.lap.params } : {}),
       ...(p?.lap?.axis === "time" || p?.lap?.axis === "distance" ? { lapAxis: p.lap.axis } : {}),
@@ -271,6 +263,8 @@ export const useStore = create<State>((set, get) => ({
   view: null,
   mode: "plots",
   setMode: (mode) => set({ mode }),
+  tool: null,
+  setTool: (tool) => set({ tool, mode: "analyse" }),
   library: [],
   libraryOpen: false,
   setLibraryOpen: (libraryOpen) => {
@@ -280,8 +274,8 @@ export const useStore = create<State>((set, get) => ({
   loadLibrary: async () => {
     try {
       set({ library: await api.library() });
-    } catch {
-      /* the library is a convenience; the sources list already reports a dead backend */
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not load the library. ${(e as Error).message}` } });
     }
   },
   addFromLibrary: async (ids) => {
@@ -358,7 +352,12 @@ export const useStore = create<State>((set, get) => ({
 
   cancelConvert: async () => {
     const job = get().convert?.job;
-    if (job) await api.convertCancel(job.id).catch(() => undefined);
+    if (!job) return;
+    try {
+      await api.convertCancel(job.id);
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not stop the conversion. ${(e as Error).message}` } });
+    }
   },
 
   closeConvert: () => set({ convert: null }),

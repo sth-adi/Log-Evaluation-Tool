@@ -339,7 +339,7 @@ label {
 }
 .rail-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   padding: 18px 16px 8px;
 }
@@ -1795,4 +1795,214 @@ pre.code {
   width: 20px;
   height: 20px;
   line-height: 1;
+}
+
+/* ---- analyse: choose a tool ----------------------------------------------- */
+
+.tool-list {
+  width: 100%;
+  height: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 32px 40px;
+  overflow: auto;
+}
+.tool-list > h2 {
+  margin: 0 0 22px;
+  font-size: var(--t22);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.tool-group {
+  margin-bottom: 26px;
+}
+.tool-group h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--t13);
+  font-weight: 500;
+}
+.tool-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.tool-card:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--line-strong);
+}
+.tool-card strong {
+  font-size: var(--t16);
+  font-weight: 600;
+}
+.tool-card span {
+  color: var(--muted);
+  font-size: var(--t13);
+  line-height: 1.45;
+}
+.tool-card small {
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: var(--t12);
+}
+.tool-card.off {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tool-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tool-head h2 {
+  margin: 0;
+  font-size: var(--t16);
+  font-weight: 600;
+}
+.tool-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.tool-body > .analysis {
+  height: 100%;
+}
+
+/* ---- the "more" menu ------------------------------------------------------- */
+
+.menu {
+  position: relative;
+}
+.menu .caret {
+  margin-left: 6px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 250px;
+  padding: 6px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+}
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+.menu-item small {
+  color: var(--muted);
+  font-size: var(--t12);
+}
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- options that are tucked away until wanted ------------------------------ */
+
+details.opts {
+  flex: 0 0 auto;
+}
+details.opts > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t13);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+details.opts > summary::-webkit-details-marker {
+  display: none;
+}
+details.opts > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur) var(--ease);
+}
+details.opts[open] > summary::before {
+  transform: rotate(45deg);
+}
+details.opts > summary:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+details.opts[open] {
+  flex-basis: 100%;
+}
+.opts-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.opts-body label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.opts-body.column {
+  align-items: stretch;
+  flex-direction: column;
+}
+.add-metric {
+  margin-bottom: 4px;
 }

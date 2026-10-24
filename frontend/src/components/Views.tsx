@@ -6,8 +6,9 @@ const when = (iso: string) =>
 
 const summary = (v: SavedView) => {
   const n = v.payload.lanes?.length ?? 0;
-  const tab = v.payload.mode === "laps" ? "Laps" : v.payload.mode === "analysis" ? "Analysis" : "Plots";
-  return `${tab}${v.payload.mode === "plots" || n ? `, ${n} plot${n === 1 ? "" : "s"}` : ""}`;
+  const mode = String(v.payload.mode); // older files used "analysis", "laps" and "pulls"
+  const where = mode === "plots" ? "Plots" : "Analyse";
+  return `${where}${mode === "plots" || n ? `, ${n} plot${n === 1 ? "" : "s"}` : ""}`;
 };
 
 /** Save what is on screen under a name, open it again later, or hand it to someone as a file. */

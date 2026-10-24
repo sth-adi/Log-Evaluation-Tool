@@ -9,7 +9,7 @@ import App from "./App";
 // Canvas text needs the font loaded before the first plot is drawn.
 document.fonts
   .load('500 12px "Geist Variable"')
-  .catch(() => undefined)
+  .catch((e) => console.warn("Could not preload the font; plots draw with the fallback font until it loads.", e))
   .finally(() => {
     ReactDOM.createRoot(document.getElementById("root")!).render(
       <React.StrictMode>

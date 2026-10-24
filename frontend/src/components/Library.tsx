@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore, type LibraryEntry } from "../store";
+import { ImportButton } from "./ImportButton";
 import { shortLabel } from "./LogRail";
 
 const day = (e: LibraryEntry) => (e.started_at ?? e.imported_at).slice(0, 10);
@@ -55,13 +56,14 @@ export function Library() {
 
   return (
     <div className="scrim top" onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}>
-      <div className="dialog library" role="dialog" aria-modal="true" aria-label="Library">
+      <div className="dialog library" role="dialog" aria-modal="true" aria-label="Your logs">
         <header>
-          <h2>Library</h2>
-          <p className="muted">Every log you have converted or imported. Add the ones you want to look at; nothing is converted twice.</p>
+          <h2>Your logs</h2>
+          <p className="muted">Add files, or choose from the logs you already have. Nothing is converted or stored twice.</p>
         </header>
 
         <div className="lib-tools">
+          <ImportButton className="btn primary">Add files</ImportButton>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, date or time" aria-label="Search the library" />
           <button className="btn ghost" onClick={() => void openFolder()} title="Show the CSV copies in Explorer">
             Open folder

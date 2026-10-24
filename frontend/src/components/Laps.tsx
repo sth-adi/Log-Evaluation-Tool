@@ -3,7 +3,7 @@ import uPlot from "uplot";
 import { api, type LapCompare, type LapStats, type LapParams, type LapRow, type LapTable as LapTableData, type Track } from "../api";
 import { useStore, type Source } from "../store";
 import { spansDays, stamp } from "../time";
-import { Chart, axis, useFetched } from "./Analysis";
+import { Chart, alignedData, axis, useFetched } from "./Analysis";
 import { formatValue } from "./Lane";
 
 const LAP_COLOURS = ["#38c8f0", "#ffb020", "#3ddc84", "#b79bff", "#ff8fb1", "#e8e8e8", "#7fa6ff", "#d6e34a"];
@@ -102,7 +102,6 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
   const colourOf = useMemo(() => {
     const order = rows.filter((r) => selected.includes(r.id)).map((r) => r.id);
     return (id: string) => (id === refId ? REF_COLOUR : LAP_COLOURS[Math.max(order.indexOf(id), 0) % LAP_COLOURS.length]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, selected.join(","), refId]);
 
   const view = useFetched(
@@ -529,7 +528,6 @@ function Overlay(props: {
   };
   const delta = useMemo<Line[]>(
     () => (isDist ? view.laps.filter((l) => l.delta_s).map((l) => ({ id: `${l.log}:${l.n}`, label: name(l.log, l.n), ys: l.delta_s! })) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [view, isDist],
   );
   return (
@@ -556,7 +554,6 @@ function OverlayChannel(props: {
   const { view, channel } = props;
   const lines = useMemo<Line[]>(
     () => view.laps.filter((l) => l.channels[channel]).map((l) => ({ id: `${l.log}:${l.n}`, label: props.name(l.log, l.n), ys: l.channels[channel] })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [view, channel],
   );
   return <LapChart title={channel} unit={view.units[channel] ?? ""} x={view.x} xLabel={props.xLabel} laps={lines} refId={props.refId} colourOf={props.colourOf} height={240} last={props.last} />;
@@ -574,7 +571,7 @@ function LapChart(props: {
   signed?: boolean;
   last?: boolean;
 }) {
-  const data = useMemo(() => [props.x, ...props.laps.map((l) => l.ys)] as unknown as uPlot.AlignedData, [props.x, props.laps]);
+  const data = useMemo(() => alignedData(props.x, props.laps.map((l) => l.ys)), [props.x, props.laps]);
   const dist = props.xLabel.startsWith("Dist");
   return (
     <div className="lap-chart" style={{ height: props.height }}>

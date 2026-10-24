@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Analysis } from "./components/Analysis";
+import { useCallback, useEffect, useState } from "react";
+import { Analyse } from "./components/Analyse";
 import { ConvertDialog } from "./components/ConvertDialog";
+import { ImportButton, isLogFile } from "./components/ImportButton";
 import { Lane, channelGroups } from "./components/Lane";
-import { Laps } from "./components/Laps";
-import { Live } from "./components/Live";
-import { Pulls } from "./components/Pulls";
 import { Library } from "./components/Library";
-import { Views } from "./components/Views";
+import { Live } from "./components/Live";
 import { LogDrawer, LogRail } from "./components/LogRail";
+import { Menu } from "./components/Menu";
 import { Palette } from "./components/Palette";
+import { Views } from "./components/Views";
 import { extentOf, useStore } from "./store";
 
 const QUICK = ["rpm", "vehicleSpeed", "tps1", "ect1"];
@@ -29,7 +29,6 @@ export default function App() {
   const setViewsOpen = useStore((s) => s.setViewsOpen);
   const addChannelAll = useStore((s) => s.addChannelAll);
   const view = useStore((s) => s.view);
-  const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
   // Open one report per log that has plotted channels, for the zoomed window if there is one.
@@ -62,12 +61,13 @@ export default function App() {
       if ((e.key === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) {
         if (!useStore.getState().sources.length) return;
         e.preventDefault();
+        setMode("plots");
         setPalette(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setPalette]);
+  }, [setPalette, setMode]);
 
   useEffect(() => {
     if (message?.kind !== "info") return;
@@ -79,7 +79,7 @@ export default function App() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
-      const files = [...e.dataTransfer.files].filter((f) => /\.(csv|txt|tsv|lrd|parquet|xlsx|mf4|mdf)$/i.test(f.name));
+      const files = [...e.dataTransfer.files].filter(isLogFile);
       if (files.length) void importFiles(files);
     },
     [importFiles],
@@ -101,28 +101,17 @@ export default function App() {
     >
       <header className="topbar">
         <h1>Log Evaluation Tool</h1>
-        <div className="seg" role="tablist" aria-label="View">
-          {hasLogs && (
-            <>
+        {hasLogs && (
+          <div className="seg" role="tablist" aria-label="View">
             <button role="tab" aria-selected={mode === "plots"} className={mode === "plots" ? "on" : undefined} onClick={() => setMode("plots")}>
               Plots
             </button>
-            <button role="tab" aria-selected={mode === "analysis"} className={mode === "analysis" ? "on" : undefined} onClick={() => setMode("analysis")}>
-              Analysis
+            <button role="tab" aria-selected={mode === "analyse"} className={mode === "analyse" ? "on" : undefined} onClick={() => setMode("analyse")}>
+              Analyse
             </button>
-            <button role="tab" aria-selected={mode === "laps"} className={mode === "laps" ? "on" : undefined} onClick={() => setMode("laps")}>
-              Laps
-            </button>
-            <button role="tab" aria-selected={mode === "pulls"} className={mode === "pulls" ? "on" : undefined} onClick={() => setMode("pulls")}>
-              Pulls
-            </button>
-            </>
-          )}
-          <button role="tab" aria-selected={mode === "live"} className={mode === "live" ? "on" : undefined} onClick={() => setMode("live")}>
-            Live
-          </button>
-        </div>
-        {hasLogs && mode !== "live" && (
+          </div>
+        )}
+        {hasLogs && mode === "plots" && (
           <button className="search" onClick={() => setPalette(true)}>
             <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden>
               <circle cx="8" cy="8" r="5.2" />
@@ -133,33 +122,16 @@ export default function App() {
           </button>
         )}
         <div className="spacer" />
-        <button className="btn" onClick={() => setLibraryOpen(true)} title="Every log you have converted or imported">
-          Library{library.length > 0 && <span className="count">{library.length}</span>}
+        <button className="btn" onClick={() => setLibraryOpen(true)} title="Add logs, or choose from the ones you already have">
+          Logs{library.length > 0 && <span className="count">{library.length}</span>}
         </button>
-        {hasLogs && (
-          <button className="btn" onClick={() => setViewsOpen(true)} title="Save what you have set up, or open a saved view">
-            Views
-          </button>
-        )}
-        {lanes.length > 0 && (
-          <button className="btn" onClick={openReports} title="Open a printable report of the plotted channels">
-            Report
-          </button>
-        )}
-        <button className="btn" onClick={() => fileRef.current?.click()}>
-          Import logs
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,.txt,.tsv,.lrd,.parquet,.xlsx,.mf4,.mdf"
-          multiple
-          hidden
-          onChange={(e) => {
-            const files = [...(e.target.files ?? [])];
-            e.target.value = "";
-            if (files.length) void importFiles(files);
-          }}
+        <Menu
+          label="More"
+          items={[
+            { label: "Saved views", note: "Keep or share a set-up", disabled: !hasLogs, onSelect: () => setViewsOpen(true) },
+            { label: "Report", note: "Printable page of the plotted channels", disabled: lanes.length === 0, onSelect: openReports },
+            { label: "Live data", note: "Follow a car as it runs", onSelect: () => setMode("live") },
+          ]}
         />
       </header>
 
@@ -172,24 +144,15 @@ export default function App() {
           <div className="empty">
             <h2>Drop your logs here</h2>
             <p>Life Racing .LRD logs, or CSV, Excel, Parquet and MDF (.mf4) files. Everything stays on this computer.</p>
-            <button className="btn primary lg" onClick={() => fileRef.current?.click()}>
-              Choose files
-            </button>
-            <button className="btn lg" onClick={() => setMode("live")}>
-              Go live
-            </button>
+            <ImportButton className="btn primary lg">Choose files</ImportButton>
             {library.length > 0 && (
               <button className="btn lg" onClick={() => setLibraryOpen(true)}>
                 Open from the library ({library.length})
               </button>
             )}
           </div>
-        ) : mode === "analysis" ? (
-          <Analysis />
-        ) : mode === "laps" ? (
-          <Laps />
-        ) : mode === "pulls" ? (
-          <Pulls />
+        ) : mode === "analyse" ? (
+          <Analyse />
         ) : lanes.length === 0 ? (
           <div className="empty">
             <h2>What do you want to look at?</h2>

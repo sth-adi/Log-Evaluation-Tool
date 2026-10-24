@@ -102,6 +102,7 @@ export type Heatmap = {
   total: number;
   agg: string;
   logs: string[];
+  skipped: { id: string; label: string; reason: string }[];
   dt_s: number;
 };
 
@@ -116,6 +117,8 @@ export type LiveStatus = {
   state: "running" | "stopped";
   source: { kind: string; label: string; options: Record<string, unknown> } | null;
   error: string | null;
+  rejected: number;
+  last_reject: string | null;
   rows: number;
   kept: number;
   capacity: number;

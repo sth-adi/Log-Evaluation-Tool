@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { extentOf, useStore, type Source } from "../store";
-import { dayLabel, spansDays } from "../time";
+import { dayLabel } from "../time";
 
 /** "2025-11-19 11-53-32 plus 0h00m00s F88#12357 Dyno run final ALL" -> "F88#12357 Dyno run final" */
 export function shortLabel(label: string): string {
@@ -24,10 +24,7 @@ export function LogRail() {
   if (!sources.length) return null;
   const ordered = [...sources].sort((a, b) => a.offset_s - b.offset_s);
   const longest = Math.max(...ordered.map((s) => s.duration_s), 1);
-  const multi = spansDays(ordered);
   const dayOf = (s: Source) => s.started_at?.slice(0, 10) ?? "";
-  const days = new Set(ordered.map(dayOf).filter(Boolean)).size;
-  const day = multi ? `${days} days` : ordered.find((s) => s.started_at)?.started_at?.slice(0, 10);
   const here = (s: Source) =>
     view != null && Math.abs(view[0] - s.offset_s) < 0.05 && Math.abs(view[1] - (s.offset_s + s.duration_s)) < 0.05;
 
@@ -35,13 +32,15 @@ export function LogRail() {
     <nav className="rail" aria-label="Logs">
       <div className="rail-head">
         <h2>Logs</h2>
-        {day && <span className="muted">{day}</span>}
+        <button className="btn ghost sm" onClick={() => setView(null)} title="Zoom the plots out to every log">
+          Show all
+        </button>
       </div>
 
       <ol className="logs">
         {ordered.map((s, i) => (
           <Fragment key={s.id}>
-            {multi && s.started_at && (i === 0 || dayOf(s) !== dayOf(ordered[i - 1])) && (
+            {s.started_at && (i === 0 || dayOf(s) !== dayOf(ordered[i - 1])) && (
               <li className="day-head">{dayLabel(s.started_at)}</li>
             )}
             <li>
@@ -73,27 +72,19 @@ export function LogRail() {
         ))}
       </ol>
 
-      <div className="rail-foot">
-        <button className="btn ghost" onClick={() => setView(null)}>
-          Show all logs
-        </button>
-        {sources.length > 1 && <p className="muted small">Lay the logs out</p>}
-        {multi && (
-          <p className="muted small">
-            These logs are from {days} days. Real time keeps true gaps up to 20 minutes and shortens longer ones, so every day still fits.
-          </p>
-        )}
-        {sources.length > 1 && (
-          <div className="seg stretch" role="group" aria-label="How logs are laid out">
-            <button onClick={() => arrange("sequential")} title="Lay the logs end to end, earliest first">
+      {sources.length > 1 && (
+        <div className="rail-foot" role="group" aria-label="How logs are laid out">
+          <span className="muted small">Arrange</span>
+          <div className="seg stretch">
+            <button onClick={() => arrange("sequential")} title="End to end, earliest first">
               Back to back
             </button>
-            <button onClick={() => arrange("real")} title="Keep the real time gaps between sessions">
+            <button onClick={() => arrange("real")} title="Keep the real gaps between sessions. Gaps over 20 minutes are shortened so every day fits.">
               Real time
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </nav>
   );
 }

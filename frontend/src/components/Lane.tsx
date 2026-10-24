@@ -222,7 +222,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
                 setReadout({ t: null, v: new Array(n).fill(null) });
                 return;
               }
-              const idxs = (u.cursor as unknown as { idxs?: (number | null)[] }).idxs;
+              const idxs = u.cursor.idxs;
               const tc = (u.data[0][idx] as number) ?? null;
               // a log only counts at the cursor if it has a sample close to it (logs sit side by side)
               const span = (u.scales.x.max ?? 0) - (u.scales.x.min ?? 0);
@@ -257,7 +257,6 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       u.destroy();
       plotRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesKey, isLast, width > 50]);
 
   // Event spans from the rules of every log in this lane, drawn as shaded bands.
@@ -270,15 +269,17 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     const ids = [...new Set(lane.series.map((s) => s.sourceId))].filter(
       (id) => (sources.find((s) => s.id === id)?.rules ?? []).length > 0,
     );
-    Promise.all(ids.map((id) => api.events(id).catch(() => []))).then((all) => {
-      if (!live) return;
-      eventsRef.current = all.flat();
-      plotRef.current?.redraw(false);
-    });
+    Promise.all(ids.map((id) => api.events(id))).then(
+      (all) => {
+        if (!live) return;
+        eventsRef.current = all.flat();
+        plotRef.current?.redraw(false);
+      },
+      (e: Error) => live && useStore.setState({ message: { kind: "error", text: `Could not load events. ${e.message}` } }),
+    );
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rulesKey, rev, seriesKey]);
 
   // Follow the zoom window when it is changed from outside the plot (a log in the rail, an event).
@@ -349,7 +350,6 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       cancelled = true;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesKey, windowKey, rev, width > 50, sources.length, isLast]); // isLast: the plot is rebuilt empty when it changes
 
   const solo = groups.length === 1;

@@ -169,7 +169,6 @@ export function HeatmapPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
       ctx.lineWidth = 2;
       ctx.strokeRect(L + hover[0] * cw + 1, T + ph - (hover[1] + 1) * ch + 1, cw - 2, ch - 2);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, size, hover, range, value, useCentre]);
 
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -221,6 +220,9 @@ export function HeatmapPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
             </select>
           </label>
         )}
+        <details className="opts">
+          <summary>Options</summary>
+          <div className="opts-body">
         {value && (
           <label className="inline" title="Colour cells by how far they are from this value, for example a target lambda">
             Target
@@ -249,6 +251,8 @@ export function HeatmapPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
           <input type="number" min="1" value={minCount} onChange={(e) => setMinCount(Math.max(1, Number(e.target.value) || 1))} />
           samples
         </label>
+          </div>
+        </details>
       </div>
       <p className="heat-read" aria-live="polite">{readout}</p>
       <div ref={wrap} className="heat-canvas">
@@ -266,6 +270,11 @@ export function HeatmapPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
             {data.total.toLocaleString()} samples from {data.logs.length} log{data.logs.length === 1 ? "" : "s"}.
             {useCentre ? ` Grey is ${centreNum}.` : ""}
           </span>
+          {data.skipped.length > 0 && (
+            <span className="muted small">
+              Left out: {data.skipped.map((k) => `${k.label} (${k.reason})`).join(", ")}.
+            </span>
+          )}
         </div>
       )}
     </div>

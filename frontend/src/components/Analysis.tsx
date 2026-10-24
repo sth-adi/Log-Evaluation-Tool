@@ -1,22 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import { api } from "../api";
-import { extentOf, useStore, type LaneSeries } from "../store";
+import { useStore, type LaneSeries } from "../store";
 import { spansDays, stamp } from "../time";
-import { HeatmapPanel } from "./Heatmap";
-import { SummaryPanel } from "./Summary";
+import { useWindow } from "../useWindow";
 import { TRACE, channelGroups, formatValue } from "./Lane";
-
-type Kind = "stats" | "histogram" | "spectrum" | "scatter" | "heatmap" | "summary" | "events";
-const KINDS: { id: Kind; label: string }[] = [
-  { id: "stats", label: "Statistics" },
-  { id: "histogram", label: "Histogram" },
-  { id: "spectrum", label: "Spectrum" },
-  { id: "scatter", label: "Scatter" },
-  { id: "heatmap", label: "Heatmap" },
-  { id: "summary", label: "Summary" },
-  { id: "events", label: "Events" },
-];
 
 const ASH = "#8b919c";
 const RULE = "#1d2127";
@@ -28,14 +16,12 @@ const fromKey = (k: string): LaneSeries => {
   return { sourceId: k.slice(0, i), channel: k.slice(i + 1) };
 };
 
-export function Analysis() {
+export function Analysis({ kind }: { kind: "statistics" | "histogram" | "spectrum" | "scatter" }) {
   const sources = useStore((s) => s.sources);
   const lanes = useStore((s) => s.lanes);
-  const view = useStore((s) => s.view);
-  const rev = useStore((s) => s.rev);
+  const { t0, t1, rev, text } = useWindow();
 
   const plotted = useMemo(() => lanes.flatMap((l) => l.series), [lanes]);
-  const [kind, setKind] = useState<Kind>("stats");
   const [a, setA] = useState<string>("");
   const [b, setB] = useState<string>("");
 
@@ -43,40 +29,17 @@ export function Analysis() {
   const second = plotted[1] ?? first;
   const chosenA = a || (first ? keyOf(first) : "");
   const chosenB = b || (second ? keyOf(second) : "");
-  const [e0, e1] = extentOf(sources);
-  const zoomed = view != null && (Math.abs(view[0] - e0) > 1e-6 || Math.abs(view[1] - e1) > 1e-6);
-  const t0 = zoomed ? view[0] : undefined;
-  const t1 = zoomed ? view[1] : undefined;
-  const windowText = zoomed ? `${view[0].toFixed(2)} to ${view[1].toFixed(2)} s (zoomed window)` : "the whole log";
 
   return (
     <section className="analysis" aria-label="Analysis">
       <div className="analysis-bar">
-        <div className="seg" role="tablist" aria-label="Analysis type">
-          {KINDS.map((k) => (
-            <button
-              key={k.id}
-              role="tab"
-              aria-selected={kind === k.id}
-              className={kind === k.id ? "on" : undefined}
-              onClick={() => setKind(k.id)}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        {kind !== "stats" && kind !== "events" && kind !== "heatmap" && kind !== "summary" && (
-          <ChannelSelect label={kind === "scatter" ? "X" : "Channel"} value={chosenA} onChange={setA} />
-        )}
+        {kind !== "statistics" && <ChannelSelect label={kind === "scatter" ? "X" : "Channel"} value={chosenA} onChange={setA} />}
         {kind === "scatter" && <ChannelSelect label="Y" value={chosenB} onChange={setB} />}
-        {kind !== "events" && <span className="muted small">Using {windowText}. Zoom a plot to change it.</span>}
+        <span className="muted small">Using {text}. Zoom a plot to change it.</span>
       </div>
 
       <div className="analysis-body">
-        {kind === "events" && <EventsPanel />}
-        {kind === "heatmap" && <HeatmapPanel t0={t0} t1={t1} rev={rev} />}
-        {kind === "summary" && <SummaryPanel t0={t0} t1={t1} rev={rev} />}
-        {kind === "stats" && <StatsTable series={plotted} t0={t0} t1={t1} rev={rev} />}
+        {kind === "statistics" && <StatsTable series={plotted} t0={t0} t1={t1} rev={rev} />}
         {kind === "histogram" && chosenA && <HistogramChart k={chosenA} t0={t0} t1={t1} rev={rev} />}
         {kind === "spectrum" && chosenA && <SpectrumChart k={chosenA} t0={t0} t1={t1} rev={rev} />}
         {kind === "scatter" && chosenA && chosenB && <ScatterChart kx={chosenA} ky={chosenB} t0={t0} t1={t1} rev={rev} />}
@@ -125,7 +88,6 @@ export function useFetched<T>(load: () => Promise<T>, deps: unknown[]) {
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return { data, error };
 }
@@ -167,7 +129,7 @@ function StatsTable({ series, t0, t1, rev }: { series: LaneSeries[]; t0?: number
       </thead>
       <tbody>
         {series.map((s) => {
-          const r = data[keyOf(s)] as unknown as Record<string, number> | undefined;
+          const r = data[keyOf(s)];
           const src = sources.find((x) => x.id === s.sourceId);
           const unit = src?.channels.find((c) => c.name === s.channel)?.unit;
           const logTag = sources.length > 1 && src ? (src.started_at ? stamp(src.started_at, spansDays(sources)) : src.label) : "";
@@ -208,7 +170,6 @@ export function Chart(props: { build: (w: number, h: number) => uPlot.Options; d
     if (!el || size[0] < 50 || size[1] < 50) return;
     const u = new uPlot(props.build(size[0], size[1]), props.data, el);
     return () => u.destroy();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.data, size[0], size[1]]);
   return (
     <div className="chart-wrap">
@@ -216,6 +177,12 @@ export function Chart(props: { build: (w: number, h: number) => uPlot.Options; d
       {props.note && <p className="chart-note">{props.note}</p>}
     </div>
   );
+}
+
+/** x values followed by one y series per line, in the shape uPlot wants. */
+export function alignedData(x: number[], ys: (number | null)[][]): uPlot.AlignedData {
+  const data: [number[], ...(number | null)[][]] = [x, ...ys];
+  return data;
 }
 
 export const axis = (label: string, extra: Partial<uPlot.Axis> = {}): uPlot.Axis => ({
@@ -309,7 +276,7 @@ function ScatterChart({ kx, ky, t0, t1, rev }: { kx: string; ky: string; t0?: nu
   );
 }
 
-function EventsPanel() {
+export function EventsPanel() {
   const sources = useStore((s) => s.sources);
   const refresh = useStore((s) => s.refresh);
   const setView = useStore((s) => s.setView);

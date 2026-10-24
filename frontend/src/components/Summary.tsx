@@ -47,7 +47,6 @@ export function SummaryPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
     if (ect) p.push({ label: `Hottest ${ect}`, m: { name: `Hottest ${ect}`, expr: exprFor(ect), agg: "max", where: "", unit: unitOf(ect) } });
     if (vb) p.push({ label: `Lowest ${vb}`, m: { name: `Lowest ${vb}`, expr: exprFor(vb), agg: "min", where: "", unit: unitOf(vb) } });
     return p.filter((x) => !metrics.some((m) => m.name === x.m.name));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [names, metrics]);
 
   const add = (m: Omit<Metric, "id">) => {
@@ -79,7 +78,6 @@ export function SummaryPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
     return () => {
       live = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ids.join(","), key, t0, t1, rev]);
 
   const withDate = spansDays(sources);
@@ -93,6 +91,9 @@ export function SummaryPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
 
   return (
     <div className="summary">
+      <details className="opts add-metric" open={metrics.length === 0}>
+        <summary>Add a metric</summary>
+        <div className="opts-body column">
       <div className="summary-build">
         <label className="inline">
           Measure
@@ -126,6 +127,8 @@ export function SummaryPanel({ t0, t1, rev }: { t0?: number; t1?: number; rev: n
           ))}
         </div>
       )}
+        </div>
+      </details>
       {error && <p className="live-error pad">{error}</p>}
 
       {metrics.length === 0 ? (

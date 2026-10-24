@@ -42,8 +42,9 @@ export function Live() {
 
   useEffect(() => {
     void loadLibrary();
-    api.liveStatus().then(setStatus, () => undefined);
-    api.livePorts().then(setPorts, () => undefined);
+    const fail = (what: string) => (e: Error) => setError(`${what}. ${e.message}`);
+    api.liveStatus().then(setStatus, fail("Could not read the live status"));
+    api.livePorts().then(setPorts, fail("Could not list the serial ports"));
   }, [loadLibrary]);
 
   // choose some channels to show as soon as the first data arrives
@@ -66,7 +67,7 @@ export function Live() {
       (w) => {
         buf.current = { t: w.t, v: Object.fromEntries(picked.map((c) => [c, w.v[c] ?? w.t.map(() => null)])) };
       },
-      () => undefined,
+      (e: Error) => setError(`Could not load the recent data. ${e.message}`),
     );
   }, [picked]);
 
@@ -231,6 +232,11 @@ export function Live() {
         ) : (
           <span className="muted">{src.help}</span>
         )}
+        {status && status.rejected > 0 && (
+          <span className="live-error">
+            {status.rejected.toLocaleString()} line{status.rejected === 1 ? "" : "s"} could not be read. Last: {status.last_reject}
+          </span>
+        )}
         {status && status.rows > status.capacity && (
           <span className="muted"> · only the latest {status.capacity.toLocaleString()} rows are kept</span>
         )}
@@ -349,7 +355,7 @@ function LivePlot(props: {
       const y = b.v[props.name];
       if (plot.current && y && b.t.length) {
         tmax.current = b.t[b.t.length - 1];
-        plot.current.setData([b.t, y] as unknown as uPlot.AlignedData, true);
+        plot.current.setData([b.t, y], true);
       }
       frame = requestAnimationFrame(draw);
     };
@@ -360,7 +366,6 @@ function LivePlot(props: {
       plot.current?.destroy();
       plot.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.name, props.colour]);
 
   const value = useMemo(() => (props.last == null ? "–" : formatValue(props.last)), [props.last]);
