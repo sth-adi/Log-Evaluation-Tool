@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
-import { api, type LapCompare, type LapParams, type LapRow, type LapTable as LapTableData, type Track } from "../api";
+import { api, type LapCompare, type LapStats, type LapParams, type LapRow, type LapTable as LapTableData, type Track } from "../api";
 import { useStore, type Source } from "../store";
 import { spansDays, stamp } from "../time";
 import { Chart, axis, useFetched } from "./Analysis";
@@ -56,6 +56,7 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
   const [ref, setRef] = useState<string | null>(null);
   const [colourBy, setColourBy] = useState("");
   const [mirror, setMirror] = useState(false);
+  const [lapMode, setLapMode] = useState<"charts" | "numbers">("charts");
 
   const key = JSON.stringify(params);
   const found = useFetched(async () => {
@@ -143,6 +144,14 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
             Time in lap
           </button>
         </div>
+        <div className="seg" role="tablist" aria-label="Lap view">
+          <button role="tab" aria-selected={lapMode === "charts"} className={lapMode === "charts" ? "on" : undefined} onClick={() => setLapMode("charts")}>
+            Charts
+          </button>
+          <button role="tab" aria-selected={lapMode === "numbers"} className={lapMode === "numbers" ? "on" : undefined} onClick={() => setLapMode("numbers")}>
+            Numbers
+          </button>
+        </div>
         {found.data && !noLaps && (
           <span className="muted small">
             {lapCount} lap{lapCount === 1 ? "" : "s"}
@@ -210,13 +219,137 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
                   </select>
                 )}
               </div>
-              {view.error && <p className="muted pad">{view.error}</p>}
-              {view.data && <Overlay view={view.data} channels={channels} colourOf={colourOf} refId={refId} groups={groups} label={tag} multi={multi} />}
+              {lapMode === "charts" ? (
+                <>
+                  {view.error && <p className="muted pad">{view.error}</p>}
+                  {view.data && <Overlay view={view.data} channels={channels} colourOf={colourOf} refId={refId} groups={groups} label={tag} multi={multi} />}
+                </>
+              ) : (
+                <LapNumbers groups={groups} selected={selected} channels={channels} params={params} multi={multi} label={tag} />
+              )}
             </>
           )}
         </div>
       </div>
     </section>
+  );
+}
+
+const mmss = (s: number) => fmtLap(s);
+
+function LapNumbers(props: { groups: Group[]; selected: string[]; channels: string[]; params: LapParams; multi: boolean; label: (s: Source) => string }) {
+  const [n, setN] = useState(3);
+  const [metric, setMetric] = useState<"max" | "min" | "mean">("max");
+  const ids = props.groups.map((g) => g.src.id);
+  const { data, error } = useFetched(
+    () => api.lapStats(ids, props.params, props.channels, props.selected, n),
+    [ids.join(","), JSON.stringify(props.params), props.channels.join(","), props.selected.join(","), n],
+  );
+  if (!data) return <p className="muted pad">{error ?? "Working out the numbers"}</p>;
+  const nameOf = (log: string, lapN: number) => {
+    const s = props.groups.find((g) => g.src.id === log)?.src;
+    return `${props.multi && s ? `${props.label(s).replace(/:\d\d$/, "")} · ` : ""}Lap ${lapN}`;
+  };
+  const bestReal = data.laps.filter((l) => l.valid).reduce<number | null>((b, l) => (b == null || l.duration_s < b ? l.duration_s : b), null);
+  const isBest = (i: number, l: LapStats["laps"][number]) => data.best_sectors[i]?.log === l.log && data.best_sectors[i]?.n === l.n;
+  const withSectors = data.laps.filter((l) => l.sectors);
+  return (
+    <div className="lap-numbers">
+      {withSectors.length > 0 && (
+        <section>
+          <div className="numbers-head">
+            <h3>Sector times</h3>
+            <label className="inline">
+              Sectors
+              <select value={n} onChange={(e) => setN(Number(e.target.value))}>
+                {[2, 3, 4, 5, 6, 8].map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="muted small">Each lap is split into equal distances. Red is the quickest anyone went through that sector.</p>
+          <table className="stats">
+            <thead>
+              <tr>
+                <th scope="col">Lap</th>
+                {Array.from({ length: data.sectors }, (_, i) => (
+                  <th key={i} scope="col" className="num">S{i + 1}</th>
+                ))}
+                <th scope="col" className="num">Lap time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withSectors.map((l) => (
+                <tr key={`${l.log}:${l.n}`} className={l.valid ? undefined : "off"}>
+                  <th scope="row">{nameOf(l.log, l.n)}{!l.valid && <small className="log-tag">In/out</small>}</th>
+                  {l.sectors!.map((t, i) => (
+                    <td key={i} className={`num${isBest(i, l) ? " best-cell" : ""}`}>{t.toFixed(3)}</td>
+                  ))}
+                  <td className="num">{mmss(l.duration_s)}</td>
+                </tr>
+              ))}
+              {data.ideal_s != null && (
+                <tr className="ideal">
+                  <th scope="row">Ideal lap</th>
+                  {data.best_sectors.map((b, i) => (
+                    <td key={i} className="num">{b.time_s.toFixed(3)}</td>
+                  ))}
+                  <td className="num">{mmss(data.ideal_s)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {data.ideal_s != null && bestReal != null && (
+            <p className="ideal-note">
+              {bestReal - data.ideal_s < 0.0005
+                ? `The best lap (${mmss(bestReal)}) was already the quickest through every sector, so there is nothing left to string together.`
+                : `Stringing the best of every sector together gives ${mmss(data.ideal_s)}, which is ${(bestReal - data.ideal_s).toFixed(3)} s quicker than the best lap actually driven (${mmss(bestReal)}).`}
+            </p>
+          )}
+        </section>
+      )}
+
+      <section>
+        <div className="numbers-head">
+          <h3>Channel values by lap</h3>
+          <div className="seg" role="tablist" aria-label="Value shown">
+            {([["max", "Highest"], ["min", "Lowest"], ["mean", "Average"]] as const).map(([k, label]) => (
+              <button key={k} role="tab" aria-selected={metric === k} className={metric === k ? "on" : undefined} onClick={() => setMetric(k)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {props.channels.length === 0 ? (
+          <p className="muted small">Add a channel above to see its values for each lap.</p>
+        ) : (
+          <table className="stats">
+            <thead>
+              <tr>
+                <th scope="col">Lap</th>
+                {props.channels.map((c) => (
+                  <th key={c} scope="col" className="num">
+                    {c}
+                    {data.units[c] ? ` (${data.units[c]})` : ""}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.laps.map((l) => (
+                <tr key={`${l.log}:${l.n}`} className={l.valid ? undefined : "off"}>
+                  <th scope="row">{nameOf(l.log, l.n)}</th>
+                  {props.channels.map((c) => (
+                    <td key={c} className="num">{l.metrics[c] ? formatValue(l.metrics[c]![metric]) : "–"}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div>
   );
 }
 

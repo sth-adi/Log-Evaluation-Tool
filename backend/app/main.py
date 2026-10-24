@@ -483,22 +483,8 @@ def lap_view(
     return out
 
 
-@app.get("/api/lapcompare")
-def lap_compare(
-    sources: str = Query(..., description="comma-separated log ids"),
-    channels: str = Query(..., description="comma-separated channel names"),
-    selected: str = Query("", description="lap keys like id:3, comma-separated; default is every valid lap"),
-    ref: str = "",
-    axis: str = Query("distance", pattern="^(distance|time)$"),
-    points: int = Query(600, ge=50, le=3000),
-    q: LapQuery = Depends(),
-) -> dict:
-    """Laps from several logs on one overlay, compared against one reference lap."""
-    names = [x for x in channels.split(",") if x][:6]
-    ids = [x for x in sources.split(",") if x][:12]
-    if not names or not ids:
-        raise HTTPException(422, "Choose at least one log and one channel")
-    chosen = {x for x in selected.split(",") if x}
+def _collect_runs(ids: list[str], names: list[str], q: LapQuery, chosen: set[str]) -> tuple[list[dict], dict, list[dict]]:
+    """Find laps in each log and gather what the lap overlays and tables need. Logs without laps are skipped."""
     runs, tables, skipped = [], {}, []
     for sid in ids:
         try:
@@ -516,6 +502,46 @@ def lap_compare(
         runs.append({"key": sid, "t": c["t"], "dist": c["dist"], "cols": {n: c["cols"][n] for n in have}, "laps": use})
     if not runs:
         raise HTTPException(422, "No complete laps found in the chosen logs")
+    return runs, tables, skipped
+
+
+@app.get("/api/lapstats")
+def lap_stats(
+    sources: str = Query(..., description="comma-separated log ids"),
+    channels: str = Query("", description="comma-separated channel names for per-lap min/max/mean"),
+    selected: str = Query("", description="lap keys like id:3, comma-separated; default is every valid lap"),
+    sectors: int = Query(3, ge=2, le=12),
+    q: LapQuery = Depends(),
+) -> dict:
+    """Per-lap channel metrics, sector times and the ideal lap, across one or more logs."""
+    names = [x for x in channels.split(",") if x][:8]
+    ids = [x for x in sources.split(",") if x][:12]
+    if not ids:
+        raise HTTPException(422, "Choose at least one log")
+    runs, tables, skipped = _collect_runs(ids, names, q, {x for x in selected.split(",") if x})
+    out = laps.stats_runs(runs, sectors)
+    out["logs"] = tables
+    out["skipped"] = skipped
+    out["units"] = {n: u for t in tables.values() for n, u in t["units"].items()}
+    return out
+
+
+@app.get("/api/lapcompare")
+def lap_compare(
+    sources: str = Query(..., description="comma-separated log ids"),
+    channels: str = Query(..., description="comma-separated channel names"),
+    selected: str = Query("", description="lap keys like id:3, comma-separated; default is every valid lap"),
+    ref: str = "",
+    axis: str = Query("distance", pattern="^(distance|time)$"),
+    points: int = Query(600, ge=50, le=3000),
+    q: LapQuery = Depends(),
+) -> dict:
+    """Laps from several logs on one overlay, compared against one reference lap."""
+    names = [x for x in channels.split(",") if x][:6]
+    ids = [x for x in sources.split(",") if x][:12]
+    if not names or not ids:
+        raise HTTPException(422, "Choose at least one log and one channel")
+    runs, tables, skipped = _collect_runs(ids, names, q, {x for x in selected.split(",") if x})
     best = min(((r["key"], l) for r in runs for l in r["laps"]), key=lambda kl: kl[1]["duration_s"])
     rk, _, rn = ref.partition(":")
     ref_pair = (rk, int(rn)) if rn.isdigit() and rk in {r["key"] for r in runs} else (best[0], best[1]["n"])

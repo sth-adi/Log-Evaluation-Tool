@@ -68,6 +68,20 @@ export type LapCompare = {
   skipped: { id: string; reason: string }[];
   laps: { log: string; n: number; duration_s: number; channels: Record<string, (number | null)[]>; delta_s?: (number | null)[] }[];
 };
+export type LapStats = {
+  sectors: number;
+  ideal_s: number | null;
+  best_sectors: { time_s: number; log: string; n: number }[];
+  units: Record<string, string>;
+  laps: {
+    log: string;
+    n: number;
+    duration_s: number;
+    valid: boolean;
+    metrics: Record<string, { min: number; max: number; mean: number } | null>;
+    sectors: number[] | null;
+  }[];
+};
 export type Track = {
   source: "gps" | "course" | "lateral g";
   estimated: boolean;
@@ -109,6 +123,15 @@ export const api = {
       selected: selected.join(",") || undefined,
       ref: ref ?? undefined,
       axis,
+    }),
+
+  lapStats: (ids: string[], p: LapParams, channels: string[], selected: string[], sectors: number) =>
+    getJson<LapStats>("/api/lapstats", {
+      ...lapQuery(p),
+      sources: ids.join(","),
+      channels: channels.join(","),
+      selected: selected.join(",") || undefined,
+      sectors,
     }),
 
   lapCompare: (ids: string[], p: LapParams, channels: string[], selected: string[], ref: string | null, axis: string) =>

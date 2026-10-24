@@ -1464,3 +1464,51 @@ label {
 .dialog.views footer {
   align-items: center;
 }
+
+.lap-numbers {
+  padding: 8px 0 24px;
+}
+.lap-numbers section {
+  padding: 8px 16px 16px;
+}
+.numbers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 4px;
+}
+.numbers-head h3 {
+  margin: 0;
+  font-size: var(--t14);
+}
+.numbers-head label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lap-numbers .stats {
+  margin-top: 8px;
+}
+.lap-numbers tr.off {
+  opacity: 0.45;
+}
+.best-cell {
+  color: var(--red-bright);
+  font-weight: 600;
+}
+.lap-numbers tr.ideal th,
+.lap-numbers tr.ideal td {
+  border-top: 1px solid var(--line-strong);
+  font-weight: 600;
+}
+.ideal-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: var(--t13);
+}
+.lap-numbers .stats th,
+.lap-numbers .stats td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}

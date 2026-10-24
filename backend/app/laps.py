@@ -247,6 +247,64 @@ def overlay(
     return overlay_runs([{"key": "", "t": t, "dist": dist, "cols": cols, "laps": laps}], ("", ref_n), axis, points)
 
 
+# --- per-lap metrics and sectors -----------------------------------------------------------
+
+
+def sector_times(run: dict, lap: dict, n: int) -> list[float] | None:
+    """Time spent in each of n equal-distance sectors of one lap (None without a distance signal).
+
+    Distance is scaled to the lap's own length, as in the overlay, so sectors line up lap to lap.
+    """
+    t, dist = run["t"], run["dist"]
+    if dist is None or n < 2:
+        return None
+    m = (t >= lap["t_start"]) & (t <= lap["t_end"])
+    if m.sum() < 2:
+        return None
+    d = np.maximum.accumulate(dist[m] - np.interp(lap["t_start"], t, dist))
+    if d[-1] <= 0:
+        return None
+    marks = np.interp(np.linspace(0.0, d[-1], n + 1), d, t[m] - lap["t_start"])
+    return np.diff(marks).tolist()
+
+
+def stats_runs(runs: list[dict], n_sectors: int = 3) -> dict:
+    """Per-lap min/max/mean of each channel, sector times, and the ideal lap.
+
+    The ideal lap is the sum of the best time in each sector across every valid lap given:
+    what the car has shown it can do, if one lap had strung its best parts together.
+    """
+    rows = []
+    for run in runs:
+        for lap in run["laps"]:
+            m = (run["t"] >= lap["t_start"]) & (run["t"] < lap["t_end"])  # the closing sample starts the next lap
+            metrics = {}
+            for name, v in run["cols"].items():
+                x = v[m]
+                x = x[np.isfinite(x)]
+                metrics[name] = (
+                    {"min": float(x.min()), "max": float(x.max()), "mean": float(x.mean())} if x.size else None
+                )
+            rows.append(
+                {
+                    "log": run["key"],
+                    "n": lap["n"],
+                    "duration_s": lap["duration_s"],
+                    "valid": lap["valid"],
+                    "metrics": metrics,
+                    "sectors": sector_times(run, lap, n_sectors),
+                }
+            )
+    best_sectors, ideal = [], None
+    pool = [r for r in rows if r["valid"] and r["sectors"]]
+    if pool and n_sectors >= 2:
+        for i in range(n_sectors):
+            b = min(pool, key=lambda r: r["sectors"][i])
+            best_sectors.append({"time_s": b["sectors"][i], "log": b["log"], "n": b["n"]})
+        ideal = float(sum(b["time_s"] for b in best_sectors))
+    return {"laps": rows, "best_sectors": best_sectors, "ideal_s": ideal, "sectors": n_sectors}
+
+
 # --- track shape -----------------------------------------------------------------------------
 
 

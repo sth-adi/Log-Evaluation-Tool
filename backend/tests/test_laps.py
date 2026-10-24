@@ -151,3 +151,35 @@ def test_compare_skips_logs_without_laps(client):
     r = client.get("/api/lapcompare", params={"sources": f"{a},{b}", "channels": "vehicleSpeed"}).json()
     assert {l["log"] for l in r["laps"]} == {a}
     assert r["skipped"] and r["skipped"][0]["id"] == b
+
+
+def test_lap_metrics_sectors_and_ideal_lap(client):
+    a = upload(client, circuit(lap_times=(20.0, 30.0, 28.0, 32.0, 5.0)))
+    r = client.get("/api/lapstats", params={"sources": a, "channels": "vehicleSpeed", "sectors": 3}).json()
+    assert [l["n"] for l in r["laps"]] == [1, 2, 3]
+    one = r["laps"][0]
+    assert one["metrics"]["vehicleSpeed"]["max"] == pytest.approx(2 * np.pi * 100 / 30 * 3.6, rel=0.01)
+    # steady speed round a circle: each third of a 30 s lap takes 10 s, of a 28 s lap 9.33 s
+    assert one["sectors"] == pytest.approx([10.0, 10.0, 10.0], abs=0.15)
+    assert sum(r["laps"][1]["sectors"]) == pytest.approx(28.0, abs=0.1)
+    assert r["ideal_s"] == pytest.approx(28.0, abs=0.2)  # the 28 s lap is best in every sector
+    assert [b["n"] for b in r["best_sectors"]] == [2, 2, 2]
+
+
+def test_ideal_lap_beats_every_real_lap_when_bests_differ(client):
+    import numpy as np
+    df = circuit(lap_times=(20.0, 30.0, 30.0, 30.0, 5.0))
+    # lap 1: quick first half, slow second; lap 2: the reverse. Same total, so the ideal lap is quicker than either.
+    n_lap = int(30.0 * 50)
+    v = df["vehicleSpeed"].to_numpy().copy()
+    start = int(20.0 * 50)
+    for k, fast_first in ((0, True), (1, False)):
+        a, b = start + k * n_lap, start + (k + 1) * n_lap
+        half = (a + b) // 2
+        v[a:half] = v[a:half] * (1.25 if fast_first else 0.8)
+        v[half:b] = v[half:b] * (0.8 if fast_first else 1.25)
+    df["vehicleSpeed"] = v
+    sid = upload(client, df)
+    r = client.get("/api/lapstats", params={"sources": sid, "sectors": 2}).json()
+    real = min(l["duration_s"] for l in r["laps"] if l["valid"])
+    assert r["ideal_s"] < real - 0.5
