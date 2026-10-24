@@ -1151,3 +1151,251 @@ label {
   font-size: var(--t12);
   font-weight: 500;
 }
+
+/* ---- laps ----------------------------------------------------------------- */
+
+.laps-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(340px, 410px) minmax(0, 1fr);
+}
+.laps-side {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+}
+.laps-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+@media (max-width: 900px) {
+  .laps-body {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+  .laps-side {
+    border-right: 0;
+    overflow: visible;
+  }
+}
+.lap-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.lap-settings label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lap-settings label.grow {
+  flex: 1 1 260px;
+}
+.lap-settings label.grow input {
+  flex: 1;
+}
+.lap-settings input[type="number"] {
+  width: 90px;
+}
+.lap-help {
+  flex-basis: 100%;
+  margin: 0;
+}
+.lap-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+.lap-summary div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lap-summary strong {
+  font-size: var(--t16);
+  font-weight: 600;
+}
+.lap-table {
+  width: 100%;
+}
+.lap-table tr.off {
+  opacity: 0.45;
+}
+.lap-table th[scope="row"] {
+  white-space: nowrap;
+}
+.lap-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.lap-name:hover {
+  background: var(--hover);
+}
+.log-tag.best {
+  color: var(--red-bright);
+}
+.lap-note {
+  padding: 8px 16px 12px;
+  margin: 0;
+}
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.chip-add {
+  height: 28px;
+  border-radius: 999px;
+}
+.lap-charts {
+  display: flex;
+  flex-direction: column;
+}
+.lap-chart {
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+.lap-chart h3 {
+  margin: 10px 16px 0;
+  font-size: var(--t14);
+  font-weight: 600;
+}
+.lap-chart h3 small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.lap-chart .chart-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  padding-top: 4px;
+}
+.lap-chart .u-legend {
+  font-size: var(--t12);
+  text-align: left;
+  padding: 2px 0 0;
+}
+.lap-chart .u-legend .u-series {
+  padding: 0 10px 0 0;
+}
+.lap-chart .u-legend .u-label {
+  color: var(--muted);
+}
+.lap-chart .u-legend .u-value {
+  font-variant-numeric: tabular-nums;
+}
+.laps-empty {
+  max-width: 60ch;
+  padding: 32px 24px;
+}
+.laps-empty h2 {
+  margin: 0 0 8px;
+}
+.track-card {
+  padding: 14px 16px 18px;
+  border-top: 1px solid var(--line);
+}
+.track-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.track-head h3 {
+  margin: 0;
+  font-size: var(--t14);
+}
+.track-head label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.track-head select {
+  max-width: 160px;
+}
+.track-canvas canvas {
+  display: block;
+  width: 100%;
+  background: var(--ink);
+  border-radius: var(--r-md);
+}
+.ramp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.ramp {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.lap-table th,
+.lap-table td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.lap-table input[type="checkbox"],
+.track-card input[type="checkbox"] {
+  accent-color: var(--red);
+}
+.lap-chart .u-legend .u-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.lap-table th,
+.lap-table td {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.lap-table .swatch {
+  margin-right: 0;
+}
+.lap-chart .u-legend {
+  max-height: 46px;
+  overflow: hidden;
+}
+.lap-table th,
+.lap-table td {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.lap-table .log-tag {
+  margin-left: 6px;
+}
+.lap-chart .u-legend .u-series {
+  padding: 0 10px 0 0;
+}
+.lap-chart .u-legend .u-series > * {
+  padding: 1px 3px;
+}
+.lap-chart .u-legend .u-marker {
+  margin-right: 2px;
+}

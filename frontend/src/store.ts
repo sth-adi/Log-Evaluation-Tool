@@ -83,8 +83,8 @@ type State = {
   recent: string[]; // channels plotted lately, newest first
   addDerivedAll: (name: string, expr: string, unit: string) => Promise<boolean>;
   removeDerivedAll: (name: string) => Promise<void>;
-  mode: "plots" | "analysis";
-  setMode: (m: "plots" | "analysis") => void;
+  mode: "plots" | "analysis" | "laps";
+  setMode: (m: "plots" | "analysis" | "laps") => void;
   view: [number, number] | null; // null = full extent
   rev: number; // bumped when data on the server changes (offset edits)
   message: { kind: "error" | "info"; text: string } | null;

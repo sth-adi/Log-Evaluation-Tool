@@ -101,7 +101,7 @@ function ChannelSelect(props: { label: string; value: string; onChange: (v: stri
 }
 
 /** Fetch with cancellation and an error string instead of an exception. */
-function useFetched<T>(load: () => Promise<T>, deps: unknown[]) {
+export function useFetched<T>(load: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -187,7 +187,7 @@ function StatsTable({ series, t0, t1, rev }: { series: LaneSeries[]; t0?: number
   );
 }
 
-function Chart(props: { build: (w: number, h: number) => uPlot.Options; data: uPlot.AlignedData; note?: string }) {
+export function Chart(props: { build: (w: number, h: number) => uPlot.Options; data: uPlot.AlignedData; note?: string }) {
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<[number, number]>([0, 0]);
   useEffect(() => {
@@ -212,7 +212,7 @@ function Chart(props: { build: (w: number, h: number) => uPlot.Options; data: uP
   );
 }
 
-const axis = (label: string, extra: Partial<uPlot.Axis> = {}): uPlot.Axis => ({
+export const axis = (label: string, extra: Partial<uPlot.Axis> = {}): uPlot.Axis => ({
   label,
   labelFont: FONT,
   stroke: ASH,

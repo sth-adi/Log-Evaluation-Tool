@@ -37,6 +37,17 @@ Every converted or imported log is kept in the **Library** (top bar). Closing a 
 - **CSV files** exported from LifeView: choose them with **Import logs**, or drop them on the window.
 - **Life Racing `.LRD` logs**: choose or drop them the same way. The tool opens each one in LifeView, exports the CSV and imports it, then lays the logs out in start-time order. This needs Windows with LifeView installed and no LifeView window already open, and it takes over the mouse for a few seconds per log (about 10 seconds each), so keep your hands off while it runs. CSV copies are kept in `data/exports`. Machines without LifeView can still import those CSV files. The tool never reads or decrypts `.LRD` files itself; it operates LifeView's own export. See `tools/lifeview/README.md`.
 
+## Laps
+
+The **Laps** tab turns a track log into lap times and lap-by-lap comparison.
+
+- **Finding laps.** Automatic if the logger records a lap timer or last-lap-time channel. Otherwise choose a beacon signal, a fixed lap length, a lap counter, or type the line-crossing times. The out-lap and in-lap are shown but flagged and left out of "best".
+- **Compare.** Every lap is overlaid on one axis, by distance round the lap or by time into the lap. The top chart shows how far ahead or behind the reference lap (the best, unless you click another lap number) each lap is, at every point of the track. The cursor is shared across charts and the legend shows each lap's live value.
+- **Distance** comes from integrating a speed channel (vehicleSpeed first). Each lap is rescaled to the reference lap's length so wheel-speed drift does not slide the laps apart.
+- **Track map.** Drawn from GPS latitude/longitude when the log has them. Otherwise it is estimated from speed plus GPS heading, or speed plus sideways g, and labelled as an estimate. Colour it by any channel.
+
+Dyno and bench logs have no start/finish line, so the tab says so instead of guessing.
+
 ## Run it on Windows
 
 Needs Python 3.10+ and, for the first build, Node.js 20+.

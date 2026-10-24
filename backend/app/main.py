@@ -12,12 +12,13 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+import numpy as np
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, lifeview, report, store
+from . import analysis, laps, lifeview, report, store
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
@@ -355,6 +356,136 @@ def channel_scatter(
 ) -> dict:
     t, arr = _window(source_id, [x] if x == y else [x, y], t0, t1)
     return analysis.scatter(t, arr[x], arr[y])
+
+
+class LapQuery:
+    """How to find the laps: the same few query parameters on every lap endpoint."""
+
+    def __init__(
+        self,
+        method: str = "auto",
+        channel: str | None = None,
+        threshold: float = 0.5,
+        length_m: float | None = None,
+        times: str = "",
+        min_lap_s: float = Query(5.0, ge=0.5),
+        speed: str | None = None,
+    ):
+        self.method, self.channel, self.threshold = method, channel, threshold
+        self.length_m, self.min_lap_s, self.speed = length_m, min_lap_s, speed
+        try:
+            self.times = [float(x) for x in times.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(422, "Lap times must be numbers separated by commas") from None
+
+
+def _lap_context(source_id: str, q: LapQuery, extra: list[str] | None = None, need_laps: bool = True) -> dict:
+    """Load the columns lap work needs and find the laps (or, if need_laps is False, carry on without them)."""
+    try:
+        rec = store.get_source(source_id)
+    except KeyError:
+        raise HTTPException(404, "unknown source") from None
+    info = {c["name"]: c for c in rec["channels"]}
+    names = list(info)
+    for c in [q.channel, q.speed, *(extra or [])]:
+        if c and c not in info:
+            raise HTTPException(422, f"unknown channel {c}")
+    good = {n: info[n]["min"] >= 0 and info[n]["max"] > 1 for n in names}
+    speed = q.speed or laps.pick_speed(names, good)
+    if speed is None:  # fall back to the fastest-looking wheel channel
+        speed = next((n for n in names if n.endswith("Speed") and good.get(n)), None)
+    pos = laps.guess_position(names)
+    want = {
+        *(n for n, _ in laps.LAP_AUTO if n in info),
+        *(c for c in [q.channel, speed, "gpsCourse", "latG", *(extra or [])] if c and c in info),
+        *(pos or ()),
+    }
+    t, cols = _window(source_id, sorted(want), None, None)
+    dist = laps.cumulative_distance(t, laps.to_mps(cols[speed], info[speed]["unit"])) if speed else None
+    try:
+        bounds, used = laps.lap_boundaries(
+            t, cols, dist, q.method, q.channel, q.threshold, q.length_m, q.times, q.min_lap_s
+        )
+    except ValueError as e:
+        if need_laps:
+            raise HTTPException(422, str(e)) from e
+        bounds, used = [], ""
+    kmh = laps.to_mps(cols[speed], info[speed]["unit"]) * 3.6 if speed else None
+    table = laps.lap_table(t, dist, kmh, bounds)
+    return {"rec": rec, "info": info, "t": t, "cols": cols, "dist": dist, "speed": speed, "pos": pos,
+            "bounds": bounds, "used": used, "table": table}
+
+
+@app.get("/api/sources/{source_id}/laps")
+def source_laps(source_id: str, q: LapQuery = Depends()) -> dict:
+    c = _lap_context(source_id, q)
+    return {
+        "found_by": c["used"],
+        "speed_channel": c["speed"],
+        "has_position": c["pos"] is not None,
+        "boundaries": c["bounds"],
+        **c["table"],
+    }
+
+
+@app.get("/api/sources/{source_id}/lapview")
+def lap_view(
+    source_id: str,
+    channels: str = Query(..., description="comma-separated channel names"),
+    selected: str = "",
+    ref: int | None = None,
+    axis: str = Query("distance", pattern="^(distance|time)$"),
+    points: int = Query(600, ge=50, le=3000),
+    q: LapQuery = Depends(),
+) -> dict:
+    names = [x for x in channels.split(",") if x][:6]
+    if not names:
+        raise HTTPException(422, "Choose at least one channel")
+    c = _lap_context(source_id, q, names)
+    table = c["table"]
+    if not table["laps"]:
+        raise HTTPException(422, "No complete laps found")
+    chosen = {int(x) for x in selected.split(",") if x.strip().isdigit()}
+    use = [l for l in table["laps"] if (l["n"] in chosen if chosen else l["valid"])] or table["laps"]
+    ref_n = ref if ref in {l["n"] for l in use} else (table["best"] if table["best"] in {l["n"] for l in use} else use[0]["n"])
+    try:
+        out = laps.overlay(c["t"], c["dist"], {n: c["cols"][n] for n in names}, use, ref_n, axis, points)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    out["best"] = table["best"]
+    out["units"] = {n: c["info"][n]["unit"] for n in names}
+    return out
+
+
+@app.get("/api/sources/{source_id}/track")
+def source_track(
+    source_id: str, color: str | None = None, mirror: bool = False, q: LapQuery = Depends()
+) -> dict:
+    extra = [color] if color else []
+    c = _lap_context(source_id, q, extra, need_laps=False)  # a track can be drawn without laps
+    bounds, table = c["bounds"], c["table"]
+    pos, cols, info = c["pos"], c["cols"], c["info"]
+    try:
+        path = laps.track_path(
+            c["t"],
+            laps.to_mps(cols[c["speed"]], info[c["speed"]]["unit"]) if c["speed"] else None,
+            cols[pos[0]] if pos else None,
+            cols[pos[1]] if pos else None,
+            cols.get("gpsCourse"),
+            cols.get("latG"),
+            mirror,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if color:
+        v = cols[color]
+        path["color"] = [None if not np.isfinite(x) else float(x) for x in v[path["index"]]]
+        path["color_unit"] = info[color]["unit"]
+    path["boundaries"] = bounds
+    path["best"] = table["best"]
+    path["laps"] = [{"n": l["n"], "t_start": l["t_start"], "t_end": l["t_end"]} for l in table["laps"]]
+    del path["index"]
+    return path
 
 
 # --- serve the built frontend, if present --------------------------------------------------

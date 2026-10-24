@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Analysis } from "./components/Analysis";
 import { ConvertDialog } from "./components/ConvertDialog";
 import { Lane, channelGroups } from "./components/Lane";
+import { Laps } from "./components/Laps";
 import { Library } from "./components/Library";
 import { LogDrawer, LogRail } from "./components/LogRail";
 import { Palette } from "./components/Palette";
@@ -104,6 +105,9 @@ export default function App() {
             <button role="tab" aria-selected={mode === "analysis"} className={mode === "analysis" ? "on" : undefined} onClick={() => setMode("analysis")}>
               Analysis
             </button>
+            <button role="tab" aria-selected={mode === "laps"} className={mode === "laps" ? "on" : undefined} onClick={() => setMode("laps")}>
+              Laps
+            </button>
           </div>
         )}
         {hasLogs && (
@@ -160,6 +164,8 @@ export default function App() {
           </div>
         ) : mode === "analysis" ? (
           <Analysis />
+        ) : mode === "laps" ? (
+          <Laps />
         ) : lanes.length === 0 ? (
           <div className="empty">
             <h2>What do you want to look at?</h2>

@@ -20,7 +20,80 @@ function getJson<T>(path: string, params: Record<string, string | number | undef
   return fetch(`${path}?${q}`).then((r) => parse<T>(r));
 }
 
+export type LapParams = {
+  method: "auto" | "reset" | "change" | "trigger" | "distance" | "manual";
+  channel?: string;
+  threshold?: number;
+  length_m?: number;
+  times?: string;
+  min_lap_s?: number;
+};
+export type LapRow = {
+  n: number;
+  t_start: number;
+  t_end: number;
+  duration_s: number;
+  distance_m?: number;
+  max_kmh?: number;
+  avg_kmh?: number;
+  valid: boolean;
+  best: boolean;
+  delta_best_s: number;
+};
+export type LapTable = {
+  found_by: string;
+  speed_channel: string | null;
+  has_position: boolean;
+  boundaries: number[];
+  laps: LapRow[];
+  best: number | null;
+  median_s: number | null;
+};
+export type LapView = {
+  axis: "distance" | "time";
+  x: number[];
+  reference: number;
+  best: number | null;
+  units: Record<string, string>;
+  laps: { n: number; duration_s: number; channels: Record<string, (number | null)[]>; delta_s?: (number | null)[] }[];
+};
+export type Track = {
+  source: "gps" | "course" | "lateral g";
+  estimated: boolean;
+  t: number[];
+  x: (number | null)[];
+  y: (number | null)[];
+  color?: (number | null)[];
+  color_unit?: string;
+  boundaries: number[];
+  best: number | null;
+  laps: { n: number; t_start: number; t_end: number }[];
+};
+
+const lapQuery = (p: LapParams) => ({
+  method: p.method,
+  channel: p.channel || undefined,
+  threshold: p.threshold,
+  length_m: p.length_m,
+  times: p.times || undefined,
+  min_lap_s: p.min_lap_s,
+});
+
 export const api = {
+  laps: (id: string, p: LapParams) => getJson<LapTable>(`/api/sources/${id}/laps`, lapQuery(p)),
+
+  lapView: (id: string, p: LapParams, channels: string[], selected: number[], ref: number | null, axis: string) =>
+    getJson<LapView>(`/api/sources/${id}/lapview`, {
+      ...lapQuery(p),
+      channels: channels.join(","),
+      selected: selected.join(",") || undefined,
+      ref: ref ?? undefined,
+      axis,
+    }),
+
+  track: (id: string, p: LapParams, color: string | undefined, mirror: boolean) =>
+    getJson<Track>(`/api/sources/${id}/track`, { ...lapQuery(p), color, mirror: mirror ? "true" : undefined }),
+
   sources: () => fetch("/api/sources").then((r) => parse<Source[]>(r)),
 
   importFile: (file: File, kind: string) => {
