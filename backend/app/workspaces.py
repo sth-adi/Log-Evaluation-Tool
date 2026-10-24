@@ -7,11 +7,14 @@ The server only stores and returns the payload; the browser decides what it mean
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
 
 from . import store
+
+log = logging.getLogger(__name__)
 
 MAX_BYTES = 100_000
 MAX_NAME = 80
@@ -29,8 +32,8 @@ def list_all() -> list[dict]:
     for f in _dir().glob("*.json"):
         try:
             out.append(json.loads(f.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
-            continue  # a damaged file should not hide the others
+        except (OSError, ValueError) as e:  # one damaged file should not hide the others, but it must not vanish quietly
+            log.warning("saved view %s is unreadable and was skipped: %s", f.name, e)
     return sorted(out, key=lambda w: w.get("saved_at", ""), reverse=True)
 
 

@@ -7,6 +7,7 @@ talks to a vehicle; logs are only read from files the user imports.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,6 +19,8 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 from . import derived as derived_mod
 from . import events as events_mod
@@ -99,8 +102,8 @@ def _backfill_hashes() -> None:
         if "content_sha" not in rec and rec.get("filename") and kept.is_file():
             try:
                 update_source(rec["id"], content_sha=content_sha(kept.read_bytes()))
-            except Exception:  # an unreadable copy just stays without a fingerprint
-                pass
+            except (OSError, ValueError) as e:  # without a fingerprint this log cannot be recognised as a duplicate
+                log.warning("could not fingerprint %s: %s", kept, e)
 
 
 def find_existing(content_sha: str | None = None, lrd_sha: str | None = None) -> dict | None:

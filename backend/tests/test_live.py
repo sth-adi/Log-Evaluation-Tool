@@ -32,14 +32,38 @@ def wait_for(cond, timeout=8.0):
 
 def test_parse_line_json_csv_and_header():
     st: dict = {}
-    assert live.parse_line('{"t": 1.5, "rpm": 8000, "name": "x", "ok": true}', st) == {"t": 1.5, "values": {"rpm": 8000.0}}
+    assert live.parse_line('{"t": 1.5, "rpm": 8000}', st) == {"t": 1.5, "values": {"rpm": 8000.0}}
     assert live.parse_line('{"rpm": 1}', st) == {"t": None, "values": {"rpm": 1.0}}
-    assert live.parse_line("not json {", st) is None
+    assert np.isnan(live.parse_line('{"rpm": null, "tps": 3}', st)["values"]["rpm"])  # a missing sample is fine
     assert live.parse_line("", st) is None
-    assert live.parse_line("1,2", st) is None  # numbers before any header are not usable
     assert live.parse_line("time,rpm,tps", st) is None  # the header line
     assert live.parse_line("0.5, 8000, 40", st) == {"t": 0.5, "values": {"rpm": 8000.0, "tps": 40.0}}
-    assert live.parse_line("1,2", st) is None  # wrong column count
+
+
+@pytest.mark.parametrize(
+    "line, why",
+    [
+        ('{"rpm": "8000"}', "not a number"),  # a number sent as text must not quietly vanish
+        ('{"rpm": true}', "not a number"),
+        ('{"t": "now", "rpm": 1}', "not a number"),
+        ("not json {", "not a data line"),
+        ('{"rpm": 1', "not valid JSON"),
+        ("[1, 2]", "must be an object"),
+        ("{}", "no channels"),
+    ],
+)
+def test_bad_lines_are_reported_not_dropped(line, why):
+    with pytest.raises(live.BadLine, match=why):
+        live.parse_line(line, {})
+
+
+def test_csv_without_a_header_or_with_the_wrong_width_is_reported():
+    st: dict = {}
+    with pytest.raises(live.BadLine, match="before a header"):
+        live.parse_line("1,2", st)
+    live.parse_line("time,rpm,tps", st)
+    with pytest.raises(live.BadLine, match="2 values for 3 columns"):
+        live.parse_line("1,2", st)
 
 
 def test_ring_buffer_wraps_and_new_channels_start_blank():
@@ -159,3 +183,27 @@ def test_a_bridge_replaces_a_stopped_sources_label(client):
     client.post("/api/live/stop")
     client.post("/api/live/ingest", json={"rows": [{"t": 1.0, "values": {"rpm": 1}}]})
     assert client.get("/api/live/status").json()["source"]["kind"] == "push"
+
+
+def test_ingest_refuses_values_it_cannot_use(client):
+    r = client.post("/api/live/ingest", json={"rows": [{"t": 1.0, "values": {"rpm": "fast"}}]})
+    assert r.status_code == 422 and "row 0" in r.json()["detail"] and "rpm" in r.json()["detail"]
+    assert client.post("/api/live/ingest", json={"rows": [{"t": 1.0, "values": {}}]}).status_code == 422
+    assert client.get("/api/live/status").json()["rows"] == 0  # nothing half-accepted
+
+
+def test_udp_counts_the_lines_it_could_not_read(client):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    client.post("/api/live/start", json={"source": "udp", "options": {"port": port, "host": "127.0.0.1"}})
+    tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for _ in range(50):
+        tx.sendto(b'{"rpm": "oops"}\n{"t": 1.0, "rpm": 9000}\n', ("127.0.0.1", port))
+        if live.HUB.rejected and live.HUB.n:
+            break
+        time.sleep(0.05)
+    st = client.get("/api/live/status").json()
+    tx.close()
+    assert st["rejected"] >= 1 and "'rpm' is not a number" in st["last_reject"] and st["rows"] >= 1

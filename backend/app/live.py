@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import os
 import socket
@@ -37,6 +38,8 @@ from pydantic import BaseModel
 from . import store
 from .importer import _guess_unit
 
+log = logging.getLogger(__name__)
+
 CAPACITY = int(os.environ.get("LET_LIVE_ROWS", 200_000))
 MAX_CHANNELS = 400
 MAX_BATCH = 20_000
@@ -46,36 +49,57 @@ class LiveError(ValueError):
     """Something the person can fix (bad port, nothing to save). Shown as is."""
 
 
-def parse_line(line: str, state: dict) -> dict | None:
-    """One text line to ``{"t": float|None, "values": {name: float}}``, or None if it is not data.
+class BadLine(ValueError):
+    """A line that was meant as data but cannot be read. It is counted and shown, never dropped quietly."""
 
-    ``state`` remembers the CSV header between lines of one connection.
+
+def _number(key: str, v) -> float:
+    if v is None:
+        return float("nan")  # a sample that is missing is not an error
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise BadLine(f"'{key}' is not a number ({v!r})")
+    return float(v)
+
+
+def parse_line(line: str, state: dict) -> dict | None:
+    """One text line to ``{"t": float|None, "values": {name: float}}``.
+
+    Returns None for a blank line or a CSV header line (which sets the column names in ``state`` for the
+    lines that follow). Raises BadLine for anything else that is not data.
     """
     line = line.strip()
     if not line:
         return None
-    if line.startswith("{"):
+    if line[0] in "{[":
         try:
             obj = json.loads(line)
-        except ValueError:
-            return None
+        except ValueError as e:
+            raise BadLine(f"not valid JSON: {e}") from e
         if not isinstance(obj, dict):
-            return None
+            raise BadLine("a JSON line must be an object like {\"rpm\": 8000}")
         t = obj.pop("t", None)
-        vals = {str(k): float(v) for k, v in obj.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-        return {"t": float(t) if isinstance(t, (int, float)) else None, "values": vals} if vals else None
+        vals = {str(k): _number(k, v) for k, v in obj.items()}
+        if not vals:
+            raise BadLine("the line has no channels")
+        return {"t": None if t is None else _number("t", t), "values": vals}
     parts = [p.strip() for p in line.replace(";", ",").replace("\t", ",").split(",")]
     try:
         nums = [float(p) for p in parts]
     except ValueError:
-        state["header"] = [p for p in parts]  # a non-numeric line names the columns
+        if any(not p or any(c in p for c in "{}[]\"'") for p in parts):
+            raise BadLine("not a data line, and not a header naming plain columns")
+        state["header"] = parts  # a line of plain names, not numbers, names the columns
         return None
     header = state.get("header")
-    if not header or len(header) != len(nums):
-        return None
+    if not header:
+        raise BadLine("numbers arrived before a header line naming the columns")
+    if len(header) != len(nums):
+        raise BadLine(f"{len(nums)} values for {len(header)} columns")
     vals = dict(zip(header, nums))
     t = vals.pop(next((h for h in header if h.lower() in ("t", "time", "time_s", "timestamp")), ""), None)
-    return {"t": t, "values": vals} if vals else None
+    if not vals:
+        raise BadLine("the line has only a time column")
+    return {"t": t, "values": vals}
 
 
 class Hub:
@@ -102,6 +126,8 @@ class Hub:
             self._mono0: float | None = None
             self._marks: deque[tuple[float, int]] = deque()
             self.last_push = 0.0
+            self.rejected = 0  # lines a source sent that could not be read
+            self.last_reject: str | None = None
 
     def push_block(self, t: np.ndarray | None, cols: dict[str, np.ndarray], units: dict[str, str] | None = None) -> int:
         """Append k rows. ``t`` None stamps them with the time since the first row arrived."""
@@ -134,6 +160,11 @@ class Hub:
             while len(self._marks) > 2 and now - self._marks[0][0] > 3.0:
                 self._marks.popleft()
         return k
+
+    def reject(self, why: str) -> None:
+        with self.lock:
+            self.rejected += 1
+            self.last_reject = why
 
     def push_rows(self, rows: list[dict], units: dict[str, str] | None = None) -> int:
         """Rows as ``{"t": seconds|None, "values": {name: value}}``."""
@@ -194,6 +225,8 @@ class Hub:
                 "state": "running" if running else "stopped",
                 "source": self.source,
                 "error": self.error,
+                "rejected": self.rejected,
+                "last_reject": self.last_reject,
                 "rows": self.n,
                 "kept": min(self.n, self.cap),
                 "capacity": self.cap,
@@ -230,7 +263,8 @@ class Hub:
     def _guard(self, fn, options, stop) -> None:
         try:
             fn(self, options, stop)
-        except Exception as e:  # shown on the Live screen; the thread must not die silently
+        except Exception as e:  # a thread nobody joins: the message goes to the Live screen, the traceback to the log
+            log.exception("live source %s failed", self.source and self.source.get("kind"))
             self.error = str(e) or e.__class__.__name__
 
     def stop(self) -> None:
@@ -411,7 +445,11 @@ def _run_udp(hub: Hub, o: dict, stop: threading.Event) -> None:
             try:
                 data, _ = sock.recvfrom(65535)
                 for line in data.decode("utf-8", "replace").splitlines():
-                    row = parse_line(line, state)
+                    try:
+                        row = parse_line(line, state)
+                    except BadLine as e:
+                        hub.reject(str(e))
+                        continue
                     if row:
                         pending.append(row)
             except socket.timeout:
@@ -454,7 +492,11 @@ def _run_serial(hub: Hub, o: dict, stop: threading.Event) -> None:
         while not stop.is_set():
             raw = ser.readline()
             if raw:
-                row = parse_line(raw.decode("utf-8", "replace"), state)
+                try:
+                    row = parse_line(raw.decode("utf-8", "replace"), state)
+                except BadLine as e:
+                    hub.reject(str(e))
+                    continue
                 if row:
                     pending.append(row)
             if pending and (len(pending) >= 200 or time.monotonic() - last > 0.05):
@@ -518,11 +560,16 @@ def live_clear() -> dict:
 def live_ingest(body: IngestBody) -> dict:
     """Rows from another program: ``{"rows": [{"t": 1.2, "values": {"rpm": 8000}}], "units": {...}}``."""
     rows = []
-    for r in body.rows[:MAX_BATCH]:
+    for i, r in enumerate(body.rows[:MAX_BATCH]):
         vals = r.get("values", {k: v for k, v in r.items() if k != "t"})
-        clean = {str(k): float(v) for k, v in vals.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-        t = r.get("t")
-        rows.append({"t": float(t) if isinstance(t, (int, float)) else None, "values": clean})
+        if not isinstance(vals, dict) or not vals:
+            raise HTTPException(422, f"row {i}: no channel values")
+        try:
+            clean = {str(k): _number(k, v) for k, v in vals.items()}
+            t = r.get("t")
+            rows.append({"t": None if t is None else _number("t", t), "values": clean})
+        except BadLine as e:
+            raise HTTPException(422, f"row {i}: {e}") from e
     if HUB.source is None or not (HUB._runner and HUB._runner.is_alive()):
         # nothing of ours is feeding the hub, so these rows are a bridge's: say so
         HUB.source = {"kind": "push", "label": _label("push", {}), "options": {}}

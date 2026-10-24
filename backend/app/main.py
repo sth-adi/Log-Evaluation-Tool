@@ -417,7 +417,7 @@ def run_summary(body: SummaryBody) -> dict:
         try:
             rec = store.get_source(sid)
         except KeyError:
-            continue
+            raise HTTPException(404, f"unknown log {sid}") from None
         offset = float(rec.get("offset_s", 0.0))
         vals: dict[str, float | None] = {}
         for m in body.metrics:
@@ -460,14 +460,16 @@ def heatmap(
     ids = [s for s in sources.split(",") if s][:12]
     use_value = bool(value) and agg != "count"
     want = list(dict.fromkeys([x, y, *([value] if use_value else [])]))
-    xs, ys, vs, used, dts = [], [], [], [], []
+    xs, ys, vs, used, dts, skipped = [], [], [], [], [], []
     for sid in ids:
         try:
             rec = store.get_source(sid)
         except KeyError:
+            raise HTTPException(404, f"unknown log {sid}") from None
+        missing = sorted(set(want) - {c["name"] for c in rec["channels"]})
+        if missing:  # not an error, but the screen must be able to say which logs were left out and why
+            skipped.append({"id": sid, "label": rec["label"], "reason": f"no {', '.join(missing)} channel"})
             continue
-        if not {c["name"] for c in rec["channels"]} >= set(want):
-            continue  # a log that lacks a channel simply does not contribute
         t, arr = _window(sid, want, t0, t1)
         xs.append(arr[x])
         ys.append(arr[y])
@@ -486,6 +488,7 @@ def heatmap(
         raise HTTPException(422, str(e)) from e
     out["agg"] = agg if use_value else "count"
     out["logs"] = used
+    out["skipped"] = skipped
     out["dt_s"] = float(np.median(dts)) if dts else 0.0
     return out
 
@@ -557,9 +560,7 @@ def _lap_context(source_id: str, q: LapQuery, extra: list[str] | None = None, ne
         if c and c not in info:
             raise HTTPException(422, f"unknown channel {c}")
     good = {n: info[n]["min"] >= 0 and info[n]["max"] > 1 for n in names}
-    speed = q.speed or laps.pick_speed(names, good)
-    if speed is None:  # fall back to the fastest-looking wheel channel
-        speed = next((n for n in names if n.endswith("Speed") and good.get(n)), None)
+    speed = q.speed or laps.pick_speed(names, good)  # None: no usable speed channel, so no distance (the screen says so)
     pos = laps.guess_position(names)
     want = {
         *(n for n, _ in laps.LAP_AUTO if n in info),

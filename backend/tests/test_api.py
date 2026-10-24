@@ -255,3 +255,14 @@ def test_summary_endpoint_conditions_windows_and_errors(client, synthetic):
     mixed = client.post("/api/summary", json={"sources": [a, c], "metrics": [{"name": "Extra max", "expr": "Extra", "agg": "max"}]}).json()
     assert mixed["rows"][0]["values"]["Extra max"] is None and mixed["rows"][1]["values"]["Extra max"] == 1.0
     assert a in mixed["errors"]["Extra max"]
+
+
+def test_heatmap_and_summary_name_unknown_logs_and_skipped_logs(client, synthetic):
+    ecu, _ = synthetic
+    a = _upload(client, ecu, label="A").json()["id"]
+    b = _upload(client, ecu.drop(columns=["MAP"]), label="B").json()["id"]
+    h = client.get("/api/heatmap", params={"sources": f"{a},{b}", "x": "RPM", "y": "TPS", "value": "MAP"}).json()
+    assert h["logs"] == ["A"] and h["skipped"] == [{"id": b, "label": "B", "reason": "no MAP channel"}]
+    assert client.get("/api/heatmap", params={"sources": "nope", "x": "RPM", "y": "TPS"}).status_code == 404
+    r = client.post("/api/summary", json={"sources": [a, "nope"], "metrics": [{"name": "m", "expr": "RPM", "agg": "max"}]})
+    assert r.status_code == 404 and "nope" in r.json()["detail"]

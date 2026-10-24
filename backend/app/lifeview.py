@@ -11,6 +11,7 @@ for a few seconds per log, so two at once would collide.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import sys
@@ -24,6 +25,8 @@ from typing import Callable
 
 from . import store
 from .importer import ImportErrorDetail, parse_csv
+
+log = logging.getLogger(__name__)
 
 TOOLS_DIR = store.REPO_ROOT / "tools" / "lifeview"
 LIFEVIEW_EXE = Path(os.environ.get("LIFEVIEW_EXE", r"C:\Program Files (x86)\Life Racing\LifeView.exe"))
@@ -199,7 +202,8 @@ def _run(job: Job, paths: list[Path], tmp: Path) -> None:
                 item.state, item.stage = "done", ""
             except ImportErrorDetail as e:
                 item.state, item.error = "failed", f"The export could not be read: {e}"
-            except Exception as e:  # keep going with the other logs
+            except Exception as e:  # one bad log must not stop the others; the traceback goes to the log, the message to the screen
+                log.exception("converting %s failed", item.name)
                 item.state, item.error = "failed", str(e) or e.__class__.__name__
         job.state = "cancelled" if job.cancel else "done"
     finally:

@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import zipfile
 import os
 import re
 from dataclasses import dataclass, field
@@ -407,9 +408,11 @@ def _raw_sha(raw: bytes) -> str:
 
 
 def parse_parquet(raw: bytes, profile: dict | None = None, filename: str = "") -> ParsedLog:
+    import pyarrow
+
     try:
         df = pd.read_parquet(io.BytesIO(raw))
-    except Exception as e:  # pyarrow raises several types
+    except (pyarrow.ArrowException, OSError) as e:
         raise ImportErrorDetail(f"Could not read the file as Parquet: {e}") from e
     df = df.reset_index(drop=True) if isinstance(df.index, pd.RangeIndex) else df.reset_index()
     df.columns = [_clean_name(c) for c in df.columns]
@@ -418,9 +421,11 @@ def parse_parquet(raw: bytes, profile: dict | None = None, filename: str = "") -
 
 def parse_xlsx(raw: bytes, profile: dict | None = None, filename: str = "") -> ParsedLog:
     """The first sheet, whose first row names the columns (a second row of units is detected as in CSV)."""
+    from openpyxl.utils.exceptions import InvalidFileException
+
     try:
         sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None, header=None, engine="openpyxl")
-    except Exception as e:
+    except (zipfile.BadZipFile, InvalidFileException, KeyError, ValueError, OSError) as e:
         raise ImportErrorDetail(f"Could not read the file as an Excel workbook: {e}") from e
     if not sheets:
         raise ImportErrorDetail("The workbook has no sheets")
@@ -449,6 +454,7 @@ def parse_mdf(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
     """An MDF3/MDF4 measurement file. Channels recorded at different rates are put on one common time base."""
     try:
         from asammdf import MDF
+        from asammdf.blocks.utils import MdfException
     except ImportError as e:
         raise ImportErrorDetail("Reading MDF files needs asammdf. Install it with: pip install asammdf") from e
     import tempfile
@@ -460,20 +466,25 @@ def parse_mdf(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
             f.write(raw)
         try:
             mdf = MDF(path)
-        except Exception as e:
+        except MdfException as e:
             raise ImportErrorDetail(f"Could not read the file as an MDF measurement: {e}") from e
+        mdf_warnings: list[str] = []
         try:
             names = [n for n in mdf.channels_db if n not in ("time", "t") and not n.startswith("$")]
             if not names:
                 raise ImportErrorDetail("The measurement file has no channels")
             raster = float(profile.get("raster_s") or 0) or _common_raster(mdf, names)
             df = mdf.to_dataframe(channels=names, raster=raster, time_from_zero=True, use_interpolation=True)
-            units = {}
+            units, no_unit = {}, []
             for n in df.columns:
                 try:
                     units[str(n)] = mdf.get(n).unit or ""
-                except Exception:
-                    units[str(n)] = ""
+                except MdfException:  # a name that exists in several groups cannot be looked up by name alone
+                    no_unit.append(str(n))
+            if no_unit:
+                mdf_warnings.append(f"units not found for {len(no_unit)} channel(s): {', '.join(no_unit[:8])}{'...' if len(no_unit) > 8 else ''}")
+        except MdfException as e:
+            raise ImportErrorDetail(f"Could not read the measurement: {e}") from e
         finally:
             mdf.close()
     df.insert(0, "time_s", df.index.to_numpy(dtype=float))
@@ -482,17 +493,14 @@ def parse_mdf(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
     df.columns = list(clean.values())
     units = {clean[c]: u for c, u in units.items() if c in clean}
     note = f"read an MDF measurement, resampled to one time base every {raster:g} s"
-    return _build(df, units, [note], [], {**profile, "time_column": "time_s", "time_unit": "s"}, _raw_sha(raw), "", filename)
+    return _build(df, units, [note], mdf_warnings, {**profile, "time_column": "time_s", "time_unit": "s"}, _raw_sha(raw), "", filename)
 
 
 def _common_raster(mdf, names: list[str]) -> float:
     """The shortest spacing between samples of any channel, bounded so a file does not explode in size."""
     best = None
     for n in names[:200]:
-        try:
-            ts = mdf.get(n).timestamps
-        except Exception:
-            continue
+        ts = mdf.get(n).timestamps
         if len(ts) > 2:
             dt = float(np.median(np.diff(ts)))
             if dt > 0:
