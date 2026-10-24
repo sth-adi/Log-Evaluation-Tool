@@ -107,3 +107,78 @@ def scatter(t: np.ndarray, x: np.ndarray, y: np.ndarray, limit: int = MAX_SCATTE
     else:
         corr = float(np.corrcoef(x, y)[0, 1]) if n > 2 and x.std() > 0 and y.std() > 0 else None
     return {"t": t.tolist(), "x": x.tolist(), "y": y.tolist(), "points": n, "correlation": corr}
+
+
+def _nice_range(v: np.ndarray, lo: float | None, hi: float | None) -> tuple[float, float]:
+    a = float(np.min(v)) if lo is None else lo
+    b = float(np.max(v)) if hi is None else hi
+    if b <= a:
+        b = a + 1.0
+    return a, b
+
+
+def heatmap(
+    x: np.ndarray,
+    y: np.ndarray,
+    v: np.ndarray | None,
+    nx: int = 40,
+    ny: int = 30,
+    agg: str = "count",
+    xr: tuple[float | None, float | None] = (None, None),
+    yr: tuple[float | None, float | None] = (None, None),
+    min_count: int = 1,
+) -> dict:
+    """Samples binned on an x/y grid. Each cell holds a sample count or an aggregate of a third channel.
+
+    agg is count, mean, min, max or std. Cells with fewer than ``min_count`` samples are left empty,
+    so a single stray sample does not colour a cell. Rows are y, bottom to top.
+    """
+    if agg not in ("count", "mean", "min", "max", "std"):
+        raise ValueError("aggregate must be count, mean, min, max or std")
+    if agg != "count" and v is None:
+        raise ValueError("Choose a channel to summarise, or show the number of samples")
+    ok = np.isfinite(x) & np.isfinite(y)
+    if v is not None and agg != "count":
+        ok &= np.isfinite(v)
+    if not ok.any():
+        return {"xedges": [], "yedges": [], "counts": [], "values": [], "vmin": None, "vmax": None, "total": 0}
+    x, y = x[ok], y[ok]
+    x0, x1 = _nice_range(x, *xr)
+    y0, y1 = _nice_range(y, *yr)
+    nx, ny = int(np.clip(nx, 2, 120)), int(np.clip(ny, 2, 120))
+    inside = (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
+    x, y = x[inside], y[inside]
+    ix = np.minimum(((x - x0) / (x1 - x0) * nx).astype(int), nx - 1)
+    iy = np.minimum(((y - y0) / (y1 - y0) * ny).astype(int), ny - 1)
+    flat = iy * nx + ix
+    counts = np.bincount(flat, minlength=nx * ny).astype(float)
+    if agg == "count":
+        vals = counts.copy()
+    else:
+        w = v[ok][inside]
+        s1 = np.bincount(flat, weights=w, minlength=nx * ny)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mean = s1 / counts
+            if agg == "mean":
+                vals = mean
+            elif agg == "std":
+                s2 = np.bincount(flat, weights=w * w, minlength=nx * ny)
+                vals = np.sqrt(np.maximum(s2 / counts - mean * mean, 0.0))
+            else:
+                vals = np.full(nx * ny, np.nan)
+                order = np.argsort(flat, kind="stable")
+                f, ww = flat[order], w[order]
+                starts = np.flatnonzero(np.r_[True, f[1:] != f[:-1]])
+                red = (np.minimum if agg == "min" else np.maximum).reduceat(ww, starts)
+                vals[f[starts]] = red
+    vals = np.where(counts >= max(min_count, 1), vals, np.nan)
+    finite = vals[np.isfinite(vals)]
+    return {
+        "xedges": np.linspace(x0, x1, nx + 1).tolist(),
+        "yedges": np.linspace(y0, y1, ny + 1).tolist(),
+        "counts": counts.reshape(ny, nx).astype(int).tolist(),
+        "values": [[None if not np.isfinite(c) else float(c) for c in row] for row in vals.reshape(ny, nx)],
+        "vmin": float(finite.min()) if finite.size else None,
+        "vmax": float(finite.max()) if finite.size else None,
+        "total": int(counts.sum()),
+    }

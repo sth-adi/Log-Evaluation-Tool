@@ -92,6 +92,19 @@ export type Pulls = {
   } | null;
 };
 
+export type Heatmap = {
+  xedges: number[];
+  yedges: number[];
+  counts: number[][];
+  values: (number | null)[][];
+  vmin: number | null;
+  vmax: number | null;
+  total: number;
+  agg: string;
+  logs: string[];
+  dt_s: number;
+};
+
 export type LiveChannel = { name: string; unit: string; last: number | null };
 export type LiveStatus = {
   state: "running" | "stopped";
@@ -145,6 +158,23 @@ const lapQuery = (p: LapParams) => ({
 });
 
 export const api = {
+  heatmap: (
+    ids: string[],
+    o: { x: string; y: string; value?: string; agg: string; nx: number; ny: number; minCount: number; t0?: number; t1?: number },
+  ) =>
+    getJson<Heatmap>("/api/heatmap", {
+      sources: ids.join(","),
+      x: o.x,
+      y: o.y,
+      value: o.value,
+      agg: o.agg,
+      nx: o.nx,
+      ny: o.ny,
+      min_count: o.minCount,
+      t0: o.t0,
+      t1: o.t1,
+    }),
+
   pulls: (ids: string[], channels: string[], selected: string[], o: { slope: number; span: number; bin: number; massKg?: number }) =>
     getJson<Pulls>("/api/pulls", {
       sources: ids.join(","),

@@ -387,6 +387,57 @@ def channel_spectrum(
         raise HTTPException(422, str(e)) from e
 
 
+@app.get("/api/heatmap")
+def heatmap(
+    sources: str = Query(..., description="comma-separated log ids"),
+    x: str = Query(...),
+    y: str = Query(...),
+    value: str | None = Query(None, description="channel to summarise in each cell; empty counts samples"),
+    agg: str = Query("mean", pattern="^(count|mean|min|max|std)$"),
+    nx: int = Query(40, ge=2, le=120),
+    ny: int = Query(30, ge=2, le=120),
+    min_count: int = Query(1, ge=1),
+    x0: float | None = None,
+    x1: float | None = None,
+    y0: float | None = None,
+    y1: float | None = None,
+    t0: float | None = None,
+    t1: float | None = None,
+) -> dict:
+    """Samples from one or more logs on an x/y grid, counted or summarised by a third channel."""
+    ids = [s for s in sources.split(",") if s][:12]
+    use_value = bool(value) and agg != "count"
+    want = list(dict.fromkeys([x, y, *([value] if use_value else [])]))
+    xs, ys, vs, used, dts = [], [], [], [], []
+    for sid in ids:
+        try:
+            rec = store.get_source(sid)
+        except KeyError:
+            continue
+        if not {c["name"] for c in rec["channels"]} >= set(want):
+            continue  # a log that lacks a channel simply does not contribute
+        t, arr = _window(sid, want, t0, t1)
+        xs.append(arr[x])
+        ys.append(arr[y])
+        if use_value:
+            vs.append(arr[value])
+        used.append(rec["label"])
+        dts.append(float(np.median(np.diff(t))) if t.size > 1 else 0.0)
+    if not xs:
+        raise HTTPException(422, "None of the open logs has all of those channels")
+    try:
+        out = analysis.heatmap(
+            np.concatenate(xs), np.concatenate(ys), np.concatenate(vs) if use_value else None,
+            nx, ny, agg if use_value else "count", (x0, x1), (y0, y1), min_count,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    out["agg"] = agg if use_value else "count"
+    out["logs"] = used
+    out["dt_s"] = float(np.median(dts)) if dts else 0.0
+    return out
+
+
 @app.get("/api/sources/{source_id}/scatter")
 def channel_scatter(
     source_id: str, x: str, y: str, t0: float | None = None, t1: float | None = None

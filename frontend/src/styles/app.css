@@ -1661,3 +1661,52 @@ pre.code {
   cursor: default;
   opacity: 0.6;
 }
+
+.heat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 12px 16px 8px;
+}
+.heat-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.heat-bar label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.heat-bar input[type="number"] {
+  width: 90px;
+}
+.heat-read {
+  min-height: 1.4em;
+  margin: 10px 0 6px;
+  font-size: var(--t13);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.heat-canvas {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 240px;
+}
+.heat-canvas canvas {
+  display: block;
+}
+.heat-scale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px 64px;
+}
+.heat-scale .ramp {
+  width: min(280px, 40%);
+}
+.heat-note {
+  margin-left: auto;
+}

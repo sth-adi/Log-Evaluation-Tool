@@ -3,14 +3,16 @@ import uPlot from "uplot";
 import { api } from "../api";
 import { extentOf, useStore, type LaneSeries } from "../store";
 import { spansDays, stamp } from "../time";
+import { HeatmapPanel } from "./Heatmap";
 import { TRACE, channelGroups, formatValue } from "./Lane";
 
-type Kind = "stats" | "histogram" | "spectrum" | "scatter" | "events";
+type Kind = "stats" | "histogram" | "spectrum" | "scatter" | "heatmap" | "events";
 const KINDS: { id: Kind; label: string }[] = [
   { id: "stats", label: "Statistics" },
   { id: "histogram", label: "Histogram" },
   { id: "spectrum", label: "Spectrum" },
   { id: "scatter", label: "Scatter" },
+  { id: "heatmap", label: "Heatmap" },
   { id: "events", label: "Events" },
 ];
 
@@ -61,7 +63,7 @@ export function Analysis() {
             </button>
           ))}
         </div>
-        {kind !== "stats" && kind !== "events" && (
+        {kind !== "stats" && kind !== "events" && kind !== "heatmap" && (
           <ChannelSelect label={kind === "scatter" ? "X" : "Channel"} value={chosenA} onChange={setA} />
         )}
         {kind === "scatter" && <ChannelSelect label="Y" value={chosenB} onChange={setB} />}
@@ -70,6 +72,7 @@ export function Analysis() {
 
       <div className="analysis-body">
         {kind === "events" && <EventsPanel />}
+        {kind === "heatmap" && <HeatmapPanel t0={t0} t1={t1} rev={rev} />}
         {kind === "stats" && <StatsTable series={plotted} t0={t0} t1={t1} rev={rev} />}
         {kind === "histogram" && chosenA && <HistogramChart k={chosenA} t0={t0} t1={t1} rev={rev} />}
         {kind === "spectrum" && chosenA && <SpectrumChart k={chosenA} t0={t0} t1={t1} rev={rev} />}

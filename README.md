@@ -57,6 +57,16 @@ Dyno and bench logs have no start/finish line, so the tab says so instead of gue
 - **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
 - **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 
+## Heatmap
+
+Analysis > **Heatmap** puts samples from every open log on an x/y grid, for example RPM across and throttle up.
+
+- **Show** the number of samples (where the engine spends its time) or any other channel summarised in each cell: average, highest, lowest or spread. Average lambda over RPM and throttle is the usual engine-map view.
+- **Target** colours cells by how far they are from a value you choose (grey is on target, blue below, red above). **± range** sets how far from the target the colours saturate.
+- Cell values are written in the cells when they are big enough. Hover a cell to read its range, value, sample count and roughly how many seconds were spent in it.
+- **Hide under N samples** leaves out thin cells, and **Ignore extremes** stops a few outliers (fuel cut reads lambda 3 or more) from washing out the colours.
+- The zoomed window from the Plots tab is respected.
+
 ## Pulls
 
 The **Pulls** tab is for dyno and engine runs, and needs only an `rpm` channel. It finds each pull (RPM climbing steadily, such as a dyno sweep) in every open log, and plots them against RPM instead of time so runs line up.
