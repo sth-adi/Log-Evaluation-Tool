@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, laps, lifeview, live, report, store, workspaces
+from . import analysis, laps, lifeview, live, pulls, report, store, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
@@ -560,6 +560,60 @@ def lap_stats(
     out["logs"] = tables
     out["skipped"] = skipped
     out["units"] = {n: u for t in tables.values() for n, u in t["units"].items()}
+    return out
+
+
+@app.get("/api/pulls")
+def engine_pulls(
+    sources: str = Query(..., description="comma-separated log ids"),
+    channels: str = Query("", description="comma-separated channels to plot against RPM"),
+    selected: str = Query("", description="pull keys like id:2, comma-separated; default is every pull"),
+    slope: float = Query(150.0, gt=0, description="RPM per second a sweep must climb at"),
+    min_span: float = Query(3000.0, gt=0, description="RPM a sweep must cover"),
+    bin: float = Query(100.0, ge=10, le=1000, description="RPM bin width"),
+    mass_kg: float | None = Query(None, gt=0, description="effective mass for absolute power"),
+    speed: str | None = None,
+) -> dict:
+    """Find the pulls in each log and compare them against RPM, with a power and torque estimate."""
+    names = [x for x in channels.split(",") if x][:8]
+    ids = [x for x in sources.split(",") if x][:12]
+    if not ids:
+        raise HTTPException(422, "Choose at least one log")
+    chosen = {x for x in selected.split(",") if x}
+    runs, logs, skipped = [], {}, []
+    for sid in ids:
+        try:
+            rec = store.get_source(sid)
+        except KeyError:
+            skipped.append({"id": sid, "reason": "unknown log"})
+            continue
+        info = {c["name"]: c for c in rec["channels"]}
+        rpm_name = next((n for n in info if n.lower() == "rpm"), None)
+        if not rpm_name:
+            skipped.append({"id": sid, "reason": "no rpm channel"})
+            continue
+        good = {n: info[n]["min"] >= 0 and info[n]["max"] > 1 for n in info}
+        spd = speed if speed in info else laps.pick_speed(list(info), good)
+        have = [n for n in names if n in info and n not in (rpm_name, spd)]
+        want = [rpm_name, *([spd] if spd else []), *have]
+        t, arr = _window(sid, want, None, None)
+        kmh = laps.to_mps(arr[spd], info[spd]["unit"]) * 3.6 if spd else None
+        ranges = pulls.find_pulls(t, arr[rpm_name], slope, min_span)
+        table = pulls.pull_table(t, arr[rpm_name], kmh, ranges)
+        logs[sid] = {"label": rec["label"], "started_at": rec.get("started_at"), "pulls": table, "speed_channel": spd,
+                     "units": {n: info[n]["unit"] for n in have}}
+        if not ranges:
+            continue
+        keep = {r["n"] for r in table if (f"{sid}:{r['n']}" in chosen if chosen else True)}
+        runs.append({"key": sid, "t": t, "rpm": arr[rpm_name], "speed_kmh": kmh, "cols": {n: arr[n] for n in have},
+                     "ranges": ranges, "selected": keep})
+    out: dict = {"logs": logs, "skipped": skipped, "compare": None}
+    if runs and any(r["selected"] for r in runs):
+        try:
+            out["compare"] = pulls.compare(runs, bin, mass_kg)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+    out["units"] = {n: u for l in logs.values() for n, u in l["units"].items()}
     return out
 
 

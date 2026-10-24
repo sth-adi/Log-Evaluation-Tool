@@ -68,6 +68,30 @@ export type LapCompare = {
   skipped: { id: string; reason: string }[];
   laps: { log: string; n: number; duration_s: number; channels: Record<string, (number | null)[]>; delta_s?: (number | null)[] }[];
 };
+export type PullRow = {
+  n: number;
+  t_start: number;
+  t_end: number;
+  duration_s: number;
+  rpm_start: number;
+  rpm_end: number;
+  rpm_peak: number;
+  speed_start_kmh?: number;
+  speed_end_kmh?: number;
+  loaded?: boolean;
+};
+export type Pulls = {
+  logs: Record<string, { label: string; started_at: string | null; pulls: PullRow[]; speed_channel: string | null; units: Record<string, string> }>;
+  skipped: { id: string; reason: string }[];
+  units: Record<string, string>;
+  compare: {
+    rpm: number[];
+    power_unit: "kW" | "index";
+    peaks: { log: string; n: number; peak_power?: number; rpm_at_peak_power?: number; peak_torque?: number; rpm_at_peak_torque?: number }[];
+    curves: { log: string; n: number; channels: Record<string, (number | null)[]> }[];
+  } | null;
+};
+
 export type LiveChannel = { name: string; unit: string; last: number | null };
 export type LiveStatus = {
   state: "running" | "stopped";
@@ -121,6 +145,17 @@ const lapQuery = (p: LapParams) => ({
 });
 
 export const api = {
+  pulls: (ids: string[], channels: string[], selected: string[], o: { slope: number; span: number; bin: number; massKg?: number }) =>
+    getJson<Pulls>("/api/pulls", {
+      sources: ids.join(","),
+      channels: channels.join(","),
+      selected: selected.join(",") || undefined,
+      slope: o.slope,
+      min_span: o.span,
+      bin: o.bin,
+      mass_kg: o.massKg,
+    }),
+
   liveStatus: () => getJson<LiveStatus>("/api/live/status", {}),
   livePorts: () => getJson<{ port: string; description: string }[]>("/api/live/ports", {}),
   liveStart: (source: LiveSourceKind, options: Record<string, unknown>) =>

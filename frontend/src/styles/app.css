@@ -1650,3 +1650,14 @@ pre.code {
   font-size: var(--t12);
   white-space: pre;
 }
+
+.pulls .analysis-bar input[type="number"] {
+  width: 110px;
+}
+.pull-note {
+  padding: 12px 16px 24px;
+}
+.lap-name:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

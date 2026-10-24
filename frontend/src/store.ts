@@ -60,7 +60,7 @@ export type Rule = { name: string; expr: string; min_duration_s: number; merge_g
 /** What a saved view remembers. It names channels, not logs, so it fits whichever logs are open. */
 export type ViewPayload = {
   v: 1;
-  mode: "plots" | "analysis" | "laps";
+  mode: "plots" | "analysis" | "laps" | "pulls";
   lanes: string[][];
   lap: { params: LapParams; axis: "distance" | "time" };
 };
@@ -104,8 +104,8 @@ type State = {
   openView: (v: SavedView) => void;
   deleteView: (id: string) => Promise<void>;
   importViewFile: (file: File) => Promise<void>;
-  mode: "plots" | "analysis" | "laps" | "live";
-  setMode: (m: "plots" | "analysis" | "laps" | "live") => void;
+  mode: "plots" | "analysis" | "laps" | "pulls" | "live";
+  setMode: (m: "plots" | "analysis" | "laps" | "pulls" | "live") => void;
   view: [number, number] | null; // null = full extent
   rev: number; // bumped when data on the server changes (offset edits)
   message: { kind: "error" | "info"; text: string } | null;
@@ -209,7 +209,7 @@ export const useStore = create<State>((set, get) => ({
       missing += lane.length - here.length;
       here.forEach((c, i) => get().addChannelAll(c, i > 0));
     }
-    const mode = p?.mode === "analysis" || p?.mode === "laps" ? p.mode : "plots";
+    const mode = p?.mode === "analysis" || p?.mode === "laps" || p?.mode === "pulls" ? p.mode : "plots";
     set({
       mode,
       viewsOpen: false,

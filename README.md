@@ -57,6 +57,16 @@ Dyno and bench logs have no start/finish line, so the tab says so instead of gue
 - **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
 - **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 
+## Pulls
+
+The **Pulls** tab is for dyno and engine runs, and needs only an `rpm` channel. It finds each pull (RPM climbing steadily, such as a dyno sweep) in every open log, and plots them against RPM instead of time so runs line up.
+
+- **Power and torque** are worked out from how quickly the roller (or car) speeds up, the inertia method. Without a mass they are relative, with the strongest pull set to 100. Enter the **effective mass** (the roller's inertia expressed as a mass, in kg) to get kW and N·m. It leaves out drag and driveline losses, so use it to compare runs rather than as a calibrated figure.
+- **Power against the reference pull** shows, at each RPM, how much stronger or weaker every other pull is. Click a pull number to change the reference. This is the "did the change help?" chart.
+- **Any channel against RPM**: lambda, ignition, fuel, MAP, coolant and so on, with the cursor shared across charts and live values for every pull in the legend.
+- Pulls where the roller did not speed up are marked **Rev only** and start unticked.
+- Engine starts are ignored, and a short dip (a gear change) does not split a pull in two. **Sensitivity** and **Smallest pull** adjust what counts.
+
 ## Live telemetry
 
 The **Live** tab follows data as it arrives: a value and a rolling plot for each channel you pick, over the last 10 to 120 seconds. **Save as log** keeps what the tool holds as an ordinary log, so lap analysis, reports and downloads work on a recorded session.
