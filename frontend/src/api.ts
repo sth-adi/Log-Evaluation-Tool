@@ -86,6 +86,7 @@ export type Track = {
   source: "gps" | "course" | "lateral g";
   estimated: boolean;
   t: number[];
+  dist?: number[];
   x: (number | null)[];
   y: (number | null)[];
   color?: (number | null)[];

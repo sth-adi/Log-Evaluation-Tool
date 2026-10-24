@@ -46,7 +46,16 @@ The **Laps** tab turns a track log into lap times and lap-by-lap comparison.
 - **Distance** comes from integrating a speed channel (vehicleSpeed first). Each lap is rescaled to the reference lap's length so wheel-speed drift does not slide the laps apart.
 - **Track map.** Drawn from GPS latitude/longitude when the log has them. Otherwise it is estimated from speed plus GPS heading, or speed plus sideways g, and labelled as an estimate. Colour it by any channel.
 
+- **Across sessions.** Pick "All logs (compare)" to put laps from different days on one overlay. The quickest lap anywhere is the reference unless you click another.
+- **Numbers.** Sector times (2 to 8 equal-distance sectors), the **ideal lap** built from the best of every sector, and the highest, lowest or average of any channel for each lap.
+- **Hover a chart** and a marker follows on the track map, so you can see where on the circuit a difference happens.
+
 Dyno and bench logs have no start/finish line, so the tab says so instead of guessing.
+
+## Views and downloads
+
+- **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
+- **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 
 ## Run it on Windows
 

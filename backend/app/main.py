@@ -616,6 +616,8 @@ def source_track(
         v = cols[color]
         path["color"] = [None if not np.isfinite(x) else float(x) for x in v[path["index"]]]
         path["color_unit"] = info[color]["unit"]
+    if c["dist"] is not None:  # lets the screen place a chart cursor on the track
+        path["dist"] = [float(x) for x in c["dist"][path["index"]]]
     path["boundaries"] = bounds
     path["best"] = table["best"]
     path["laps"] = [{"n": l["n"], "t_start": l["t_start"], "t_end": l["t_end"]} for l in table["laps"]]

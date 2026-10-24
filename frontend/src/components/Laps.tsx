@@ -10,6 +10,7 @@ const LAP_COLOURS = ["#38c8f0", "#ffb020", "#3ddc84", "#b79bff", "#ff8fb1", "#e8
 const REF_COLOUR = "#ff3b47";
 const RAMP = ["#2f6df0", "#38c8f0", "#3ddc84", "#ffb020", "#ff3b47"];
 const ALL = "__all__";
+const LAP_CURSOR = "lapcursor";
 
 /** 1:12.345 */
 export function fmtLap(s: number): string {
@@ -84,6 +85,7 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
   }, [rows]);
   const selected = sel ?? rows.filter((r) => r.valid).map((r) => r.id);
   const refId = ref && rows.some((r) => r.id === ref) ? ref : (bestRow?.id ?? null);
+  const refRow = rows.find((r) => r.id === refId) ?? null;
   const refLog = refId ? refId.slice(0, refId.indexOf(":")) : srcs[0].id;
   const refGroup = groups.find((g) => g.src.id === refLog) ?? groups[0];
 
@@ -185,6 +187,8 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
               mirror={mirror}
               onMirror={setMirror}
               title={multi ? `Track · ${tag(refGroup.src).replace(/:\d\d$/, "")}` : "Track"}
+              refRange={refRow ? { t_start: refRow.t_start, t_end: refRow.t_end } : null}
+              axis={axisUsed}
             />
           )}
         </aside>
@@ -585,6 +589,14 @@ function LapChart(props: {
           height: h - 56, // the legend (up to two lines of live values) sits under the plot inside this box
           legend: { show: true, live: true },
           cursor: { sync: { key: "laps" }, drag: { x: false, y: false }, points: { show: false } },
+          hooks: {
+            setCursor: [
+              (u: uPlot) => {
+                const i = u.cursor.idx;
+                window.dispatchEvent(new CustomEvent(LAP_CURSOR, { detail: i == null ? null : (u.data[0][i] as number) }));
+              },
+            ],
+          },
           scales: { x: { time: false } },
           axes: [axis(props.last ? props.xLabel : "", { size: props.last ? 44 : 26 }), axis("", { size: 56 })],
           series: [
@@ -622,6 +634,8 @@ function TrackCard(props: {
   mirror: boolean;
   onMirror: (m: boolean) => void;
   title: string;
+  refRange: { t_start: number; t_end: number } | null;
+  axis: "distance" | "time";
 }) {
   if (!props.show) return null;
   const t = props.track;
@@ -639,7 +653,7 @@ function TrackCard(props: {
           </select>
         </label>
       </div>
-      {t ? <TrackCanvas track={t} /> : <p className="muted small pad">{props.error ?? "Drawing the track"}</p>}
+      {t ? <TrackCanvas track={t} refRange={props.refRange} axis={props.axis} /> : <p className="muted small pad">{props.error ?? "Drawing the track"}</p>}
       {t && (
         <div className="ramp-row">
           <span className="muted small">low</span>
@@ -650,16 +664,48 @@ function TrackCard(props: {
       {t?.estimated && (
         <p className="muted small">
           This log has no GPS position, so the shape is estimated from {t.source === "course" ? "speed and GPS heading" : "speed and sideways g"}. It keeps the layout but drifts a little.
-          <label className="inline check">
-            <input type="checkbox" checked={props.mirror} onChange={(e) => props.onMirror(e.target.checked)} /> Mirror it
-          </label>
         </p>
+      )}
+      {t?.estimated && (
+        <label className="check-row">
+          <input type="checkbox" checked={props.mirror} onChange={(e) => props.onMirror(e.target.checked)} />
+          Mirror the shape (if left and right look swapped)
+        </label>
       )}
     </div>
   );
 }
 
-function TrackCanvas({ track }: { track: Track }) {
+/** Linear interpolation of ys at x over increasing xs. */
+function lerp(x: number, xs: number[], ys: number[]): number {
+  let lo = 0;
+  let hi = xs.length - 1;
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[hi]) return ys[hi];
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (xs[mid] <= x) lo = mid;
+    else hi = mid;
+  }
+  const f = xs[hi] === xs[lo] ? 0 : (x - xs[lo]) / (xs[hi] - xs[lo]);
+  return ys[lo] + f * (ys[hi] - ys[lo]);
+}
+
+function TrackCanvas({ track, refRange, axis }: { track: Track; refRange: { t_start: number; t_end: number } | null; axis: "distance" | "time" }) {
+  const [cursor, setCursor] = useState<number | null>(null);
+  useEffect(() => {
+    let frame = 0;
+    const on = (e: Event) => {
+      const v = (e as CustomEvent<number | null>).detail;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setCursor(v));
+    };
+    window.addEventListener(LAP_CURSOR, on);
+    return () => {
+      window.removeEventListener(LAP_CURSOR, on);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
   const box = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   const [w, setW] = useState(0);
@@ -715,7 +761,25 @@ function TrackCanvas({ track }: { track: Track }) {
       ctx.lineTo(cx + Math.cos(ang) * 9, cy - Math.sin(ang) * 9);
       ctx.stroke();
     }
-  }, [track, w]);
+    // where the chart cursor is, on the reference lap
+    if (cursor != null && refRange) {
+      let tt: number | null = null;
+      if (axis === "time") tt = refRange.t_start + cursor;
+      else if (track.dist) tt = lerp(lerp(refRange.t_start, track.t, track.dist) + cursor, track.dist, track.t);
+      if (tt != null && tt >= refRange.t_start && tt <= refRange.t_end) {
+        const ts = pts.map((p) => p.t);
+        const mx = px(lerp(tt, ts, pts.map((p) => p.x)));
+        const my = py(lerp(tt, ts, pts.map((p) => p.y)));
+        ctx.beginPath();
+        ctx.arc(mx, my, 7, 0, Math.PI * 2);
+        ctx.fillStyle = REF_COLOUR;
+        ctx.fill();
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+      }
+    }
+  }, [track, w, cursor, refRange, axis]);
   return (
     <div ref={box} className="track-canvas">
       <canvas ref={cv} role="img" aria-label="Plan view of the track, coloured by the chosen channel" />
