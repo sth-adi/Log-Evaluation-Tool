@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import { api } from "../api";
 import { extentOf, useStore, type Lane as LaneModel } from "../store";
+import { spansDays, stamp } from "../time";
 
 export const TRACE = ["#ffb020", "#38c8f0", "#3ddc84", "#b79bff", "#ff8fb1", "#e8e8e8", "#7fa6ff", "#d6e34a"];
 
@@ -157,6 +158,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
           (u) => {
             const logs = useStore.getState().sources.filter((s) => lane.series.some((x) => x.sourceId === s.id));
             if (logs.length < 2) return;
+            const withDate = spansDays(logs);
             const { ctx } = u;
             const { left, top, width, height } = u.bbox;
             ctx.save();
@@ -165,6 +167,8 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
             ctx.lineWidth = 1;
             ctx.setLineDash([4, 4]);
             ctx.font = FONT.replace("12px", `${12 * devicePixelRatio}px`);
+            ctx.textAlign = "left"; // uPlot leaves the last axis alignment set on the context
+            ctx.textBaseline = "alphabetic";
             for (const s of logs) {
               const x = u.valToPos(s.offset_s, "x", true);
               if (x < left || x > left + width) continue;
@@ -172,7 +176,11 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
               ctx.moveTo(x, top);
               ctx.lineTo(x, top + height);
               ctx.stroke();
-              ctx.fillText(s.started_at ? s.started_at.slice(11, 19) : s.label, x + 4 * devicePixelRatio, top + 12 * devicePixelRatio);
+              const text = s.started_at ? stamp(s.started_at, withDate) : s.label;
+              const pad = 4 * devicePixelRatio;
+              const fits = x + pad + ctx.measureText(text).width <= left + width; // else write it left of the line
+              ctx.textAlign = fits ? "left" : "right";
+              ctx.fillText(text, fits ? x + pad : x - pad, top + 12 * devicePixelRatio);
             }
             ctx.restore();
           },
@@ -183,6 +191,8 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
             ctx.save();
             ctx.fillStyle = "#f2f2f2";
             ctx.font = FONT.replace("12px", `${11 * devicePixelRatio}px`);
+            ctx.textAlign = "left";
+            ctx.textBaseline = "alphabetic";
             for (const e of eventsRef.current) {
               const a = u.valToPos(e.t_start, "x", true);
               if (a < left || a > left + width - 20 * devicePixelRatio) continue;

@@ -145,12 +145,14 @@ def update_source(source_id: str, **fields) -> dict:
         return rec
 
 
-def arrange_sources(mode: str, gap_s: float) -> list[dict]:
+def arrange_sources(mode: str, gap_s: float, max_gap_s: float = 1200.0) -> list[dict]:
     """Set offsets so logs sit in session-start order.
 
     "sequential" lays them end to end (what LifeView's concatenated view does); "real" keeps the
-    true wall-clock spacing between sessions. Logs with no known start time go after the others,
-    in import order.
+    true wall-clock spacing between sessions, except that a gap longer than ``max_gap_s`` (default
+    20 minutes) is shortened to that, so tests on different days still fit on one screen. Short gaps
+    and overlaps (an ECU and an HCU log recorded at once) stay exactly as they were. Logs with no
+    known start time go after the others, in import order.
     """
     with _lock:
         recs = list_sources()
@@ -158,9 +160,15 @@ def arrange_sources(mode: str, gap_s: float) -> list[dict]:
         undated = [r for r in recs if not r.get("started_at")]
         t0 = datetime.fromisoformat(dated[0]["started_at"]) if dated else None
         cursor = 0.0
+        shortened = 0.0  # seconds removed from long gaps so far
+        prev_end = None  # real time at which the previous log ended
         for r in dated + undated:
             if mode == "real" and r.get("started_at"):
-                off = (datetime.fromisoformat(r["started_at"]) - t0).total_seconds()
+                real = (datetime.fromisoformat(r["started_at"]) - t0).total_seconds()
+                if prev_end is not None and real - prev_end > max_gap_s:
+                    shortened += (real - prev_end) - max_gap_s
+                off = real - shortened
+                prev_end = max(prev_end or 0.0, real + float(r["duration_s"]))
             else:
                 off = cursor
             cursor = max(cursor, off + float(r["duration_s"]) + gap_s)

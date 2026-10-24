@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import { api } from "../api";
 import { extentOf, useStore, type LaneSeries } from "../store";
+import { spansDays, stamp } from "../time";
 import { TRACE, channelGroups, formatValue } from "./Lane";
 
 type Kind = "stats" | "histogram" | "spectrum" | "scatter" | "events";
@@ -163,7 +164,7 @@ function StatsTable({ series, t0, t1, rev }: { series: LaneSeries[]; t0?: number
           const r = data[keyOf(s)] as unknown as Record<string, number> | undefined;
           const src = sources.find((x) => x.id === s.sourceId);
           const unit = src?.channels.find((c) => c.name === s.channel)?.unit;
-          const logTag = sources.length > 1 && src ? (src.started_at ? src.started_at.slice(11, 19) : src.label) : "";
+          const logTag = sources.length > 1 && src ? (src.started_at ? stamp(src.started_at, spansDays(sources)) : src.label) : "";
           const colour = TRACE[channelGroups(series).indexOf(s.channel) % TRACE.length];
           return (
             <tr key={keyOf(s)}>
@@ -358,7 +359,8 @@ function EventsPanel() {
     setView([a - pad, b + pad]);
     setMode("plots");
   };
-  const clock = (s: { started_at: string | null; label: string }) => (s.started_at ? s.started_at.slice(11, 19) : s.label);
+  const multiDay = spansDays(sources);
+  const clock = (s: { started_at: string | null; label: string }) => (s.started_at ? stamp(s.started_at, multiDay) : s.label);
 
   return (
     <div className="events">

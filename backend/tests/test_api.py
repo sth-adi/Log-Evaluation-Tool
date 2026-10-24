@@ -89,6 +89,8 @@ def test_arrange_orders_by_start_time(client):
     assert out[early["id"]]["offset_s"] == 0
     assert out[late["id"]]["offset_s"] == pytest.approx(early["duration_s"] + 1)
     out = {r["id"]: r for r in client.post("/api/arrange", json={"mode": "real"}).json()}
+    assert out[late["id"]]["offset_s"] == pytest.approx(early["duration_s"] + 1200)  # an hour apart: shortened
+    out = {r["id"]: r for r in client.post("/api/arrange", json={"mode": "real", "max_gap_s": 1e9}).json()}
     assert out[late["id"]]["offset_s"] == 3600
     assert client.post("/api/arrange", json={"mode": "x"}).status_code == 422
 
@@ -162,3 +164,37 @@ def test_report_is_self_contained_html(client, synthetic):
     assert "<script" not in html and "http://" not in html.replace("http://www.w3.org/2000/svg", "")
     assert client.get(f"/api/sources/{sid}/report", params={"channels": ""}).status_code == 422
     assert client.get(f"/api/sources/{sid}/report", params={"channels": "nope"}).status_code == 422
+
+
+def test_same_clock_time_on_different_days(client):
+    def log(day, bump):
+        head = f"C:/x/{day} 12-00-00 plus 0h00m00s t.LRD\r\nrange\r\n\r\n".encode()
+        body = "\r\n".join(["Time, v"] + [f"{i / 10:.1f}, {i + bump}" for i in range(50)]).encode()
+        return head + body
+
+    day2 = client.post("/api/sources", files={"file": ("d2.csv", log("2025-11-20", 1))}).json()
+    day1 = client.post("/api/sources", files={"file": ("d1.csv", log("2025-11-19", 2))}).json()
+    assert day1["id"] != day2["id"]                       # same 12:00, different days: two logs
+    exact = {r["id"]: r for r in client.post("/api/arrange", json={"mode": "real", "max_gap_s": 1e9}).json()}
+    assert exact[day1["id"]]["offset_s"] == 0             # earlier day first, though imported second
+    assert exact[day2["id"]]["offset_s"] == 86400         # exactly one day later
+    real = {r["id"]: r for r in client.post("/api/arrange", json={"mode": "real"}).json()}
+    assert real[day2["id"]]["offset_s"] == pytest.approx(day1["duration_s"] + 1200)  # day gap shortened to 20 min
+    seq = {r["id"]: r for r in client.post("/api/arrange", json={"mode": "sequential", "gap_s": 1}).json()}
+    assert seq[day2["id"]]["offset_s"] == pytest.approx(day1["duration_s"] + 1)
+
+
+def test_real_mode_keeps_overlaps_and_short_gaps(client):
+    def log(stamp, bump):
+        head = f"C:/x/{stamp} plus 0h00m00s t.LRD\r\nrange\r\n\r\n".encode()
+        body = "\r\n".join(["Time, v"] + [f"{i / 10:.1f}, {i + bump}" for i in range(600)]).encode()  # 60 s
+        return head + body
+
+    a = client.post("/api/sources", files={"file": ("a.csv", log("2025-11-19 10-00-00", 1))}).json()
+    b = client.post("/api/sources", files={"file": ("b.csv", log("2025-11-19 10-00-30", 2))}).json()   # overlaps a
+    c = client.post("/api/sources", files={"file": ("c.csv", log("2025-11-19 10-05-00", 3))}).json()   # 3 min gap
+    d = client.post("/api/sources", files={"file": ("d.csv", log("2025-11-20 10-05-00", 4))}).json()   # next day
+    out = {r["id"]: r["offset_s"] for r in client.post("/api/arrange", json={"mode": "real"}).json()}
+    assert out[a["id"]] == 0 and out[b["id"]] == 30       # overlap kept
+    assert out[c["id"]] == 300                            # short gap kept
+    assert out[d["id"]] == pytest.approx(300 + 59.9 + 1200, abs=0.2)   # the day in between is shortened

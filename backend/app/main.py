@@ -176,6 +176,7 @@ def patch_source(source_id: str, body: SourcePatch) -> dict:
 class ArrangeBody(BaseModel):
     mode: str = "sequential"  # "sequential" = back to back, "real" = true wall-clock spacing
     gap_s: float = 0.0
+    max_gap_s: float = 1200.0  # "real" mode: longest true gap kept, in seconds
 
 
 @app.post("/api/arrange")
@@ -183,7 +184,7 @@ def arrange(body: ArrangeBody) -> list[dict]:
     """Order logs by session start time (as LifeView does) and set their time offsets."""
     if body.mode not in ("sequential", "real"):
         raise HTTPException(422, "mode must be 'sequential' or 'real'")
-    return store.arrange_sources(body.mode, max(body.gap_s, 0.0))
+    return store.arrange_sources(body.mode, max(body.gap_s, 0.0), max(body.max_gap_s, 0.0))
 
 
 @app.delete("/api/sources/{source_id}", status_code=204)
