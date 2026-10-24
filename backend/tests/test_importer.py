@@ -61,3 +61,42 @@ def test_no_time_column_errors():
 def test_empty_file_errors():
     with pytest.raises(ImportErrorDetail):
         parse_csv(b"   \n")
+
+
+def test_preamble_and_placeholder_values():
+    raw = (
+        b"C:\\logs\\CONCATENATED.LRD\r\n0:00.000 to 0:01.000 at 25Hz\r\n\r\n"
+        b"Time, ect1, vehicleSpeed\r\n0.000, ####, ####\r\n"
+        b"0.040, 82.6, 0.0\r\n0.080, 82.6, 1.5\r\n0.120, 82.7, 2.0\r\n"
+    )
+    p = parse_csv(raw)
+    assert list(p.df.columns) == ["time_s", "ect1", "vehicleSpeed"]
+    assert len(p.df) == 4
+    assert np.isnan(p.df["ect1"].iloc[0])
+    assert p.df["time_s"].iloc[-1] == pytest.approx(0.12)
+    assert any("skipped 3 line" in a for a in p.meta["assumptions"])
+    assert "second row treated as units" not in p.meta["assumptions"]
+
+
+def test_units_guessed_from_names_and_reported():
+    raw = b"Time, ect1, vehicleSpeed, mystery\n0.0, 80, 1, 5\n0.1, 81, 2, 6\n0.2, 82, 3, 7\n"
+    p = parse_csv(raw)
+    units = {c["name"]: c["unit"] for c in p.meta["channels"]}
+    assert units == {"ect1": "°C", "vehicleSpeed": "km/h", "mystery": ""}
+    assert any("units guessed" in a and "ect1 = °C" in a for a in p.meta["assumptions"])
+
+
+def test_life_racing_export_start_time_and_states():
+    pre = (
+        b"C:/Logs/2025-11-19 11-53-32 plus 0h00m30s F88#1 Dyno.LRD\r\n"
+        b"0:00.000 to 0:01.000 at 10Hz\r\n\r\n"
+    )
+    rows = ["Time, rpm, fan1, junk"]
+    for i in range(20):
+        rows.append(f"{i / 10:.3f}, {1000 + i}, {'ON' if i % 4 < 2 else 'OFF'}, {'x%d' % i}")
+    p = parse_csv(pre + "\r\n".join(rows).encode() + b"\r\n")
+    assert p.meta["started_at"] == "2025-11-19T11-53-32".replace("11-53-32", "11:54:02")
+    fan = next(c for c in p.meta["channels"] if c["name"] == "fan1")
+    assert fan["states"] == {"0": "OFF", "1": "ON"}
+    assert set(p.df["fan1"].unique()) == {0.0, 1.0}
+    assert "junk" not in p.df.columns  # unique text per row is not a state channel

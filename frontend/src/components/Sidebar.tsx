@@ -6,6 +6,7 @@ export function Sidebar() {
   const setOffset = useStore((s) => s.setOffset);
   const setKind = useStore((s) => s.setKind);
   const removeSource = useStore((s) => s.removeSource);
+  const arrange = useStore((s) => s.arrange);
 
   if (!sources.length) {
     return (
@@ -18,6 +19,17 @@ export function Sidebar() {
   return (
     <nav className="sidebar" aria-label="Sources and channels">
       <p className="muted pad hint">Click a channel to plot it. Shift-click overlays it on the last plot.</p>
+      {sources.length > 1 && (
+        <div className="pad arrange">
+          <span className="muted small">Order logs by session start:</span>
+          <button onClick={() => arrange("sequential")} title="Lay the logs end to end, earliest first">
+            Back to back
+          </button>
+          <button onClick={() => arrange("real")} title="Keep the real time gaps between sessions">
+            Real time
+          </button>
+        </div>
+      )}
       {sources.map((src) => (
         <SourceBlock
           key={src.id}
@@ -50,7 +62,7 @@ function SourceBlock(props: {
       </header>
       <p className="muted small">
         {src.filename}: {src.rows.toLocaleString()} rows, {src.sample_rate_hz ?? "?"} Hz,{" "}
-        {src.duration_s.toFixed(1)} s{src.gaps ? `, ${src.gaps} gap${src.gaps > 1 ? "s" : ""}` : ""}
+        {src.duration_s.toFixed(1)} s{src.started_at ? `, started ${src.started_at.replace("T", " ")}` : ""}{src.gaps ? `, ${src.gaps} gap${src.gaps > 1 ? "s" : ""}` : ""}
       </p>
 
       <div className="fields">

@@ -31,6 +31,13 @@ export const api = {
       body: JSON.stringify(body),
     }).then((r) => parse<Source>(r)),
 
+  arrange: (mode: "sequential" | "real") =>
+    fetch("/api/arrange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, gap_s: mode === "sequential" ? 1 : 0 }),
+    }).then((r) => parse<Source[]>(r)),
+
   remove: (id: string) => fetch(`/api/sources/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
 
   signals: (id: string, channels: string[], t0: number, t1: number, px: number) => {

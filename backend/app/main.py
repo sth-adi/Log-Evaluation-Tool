@@ -46,7 +46,7 @@ async def import_source(
     except json.JSONDecodeError as e:
         raise HTTPException(422, f"profile is not valid JSON: {e}") from e
     try:
-        parsed = parse_csv(raw, prof)
+        parsed = parse_csv(raw, prof, file.filename or "")
     except ImportErrorDetail as e:
         raise HTTPException(422, str(e)) from e
     name = file.filename or "upload.csv"
@@ -80,6 +80,19 @@ def patch_source(source_id: str, body: SourcePatch) -> dict:
         return store.update_source(source_id, **body.model_dump())
     except KeyError:
         raise HTTPException(404, "unknown source") from None
+
+
+class ArrangeBody(BaseModel):
+    mode: str = "sequential"  # "sequential" = back to back, "real" = true wall-clock spacing
+    gap_s: float = 0.0
+
+
+@app.post("/api/arrange")
+def arrange(body: ArrangeBody) -> list[dict]:
+    """Order logs by session start time (as LifeView does) and set their time offsets."""
+    if body.mode not in ("sequential", "real"):
+        raise HTTPException(422, "mode must be 'sequential' or 'real'")
+    return store.arrange_sources(body.mode, max(body.gap_s, 0.0))
 
 
 @app.delete("/api/sources/{source_id}", status_code=204)
@@ -121,4 +134,5 @@ if _DIST.is_dir():
         candidate = _DIST / path
         if path and candidate.is_file() and _DIST in candidate.resolve().parents:
             return FileResponse(candidate)
-        return FileResponse(_DIST / "index.html")
+        # revalidate the page every load so a rebuilt bundle (new hashed filename) is picked up
+        return FileResponse(_DIST / "index.html", headers={"Cache-Control": "no-cache"})

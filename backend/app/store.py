@@ -82,6 +82,30 @@ def update_source(source_id: str, **fields) -> dict:
         return rec
 
 
+def arrange_sources(mode: str, gap_s: float) -> list[dict]:
+    """Set offsets so logs sit in session-start order.
+
+    "sequential" lays them end to end (what LifeView's concatenated view does); "real" keeps the
+    true wall-clock spacing between sessions. Logs with no known start time go after the others,
+    in import order.
+    """
+    with _lock:
+        recs = list_sources()
+        dated = sorted((r for r in recs if r.get("started_at")), key=lambda r: r["started_at"])
+        undated = [r for r in recs if not r.get("started_at")]
+        t0 = datetime.fromisoformat(dated[0]["started_at"]) if dated else None
+        cursor = 0.0
+        for r in dated + undated:
+            if mode == "real" and r.get("started_at"):
+                off = (datetime.fromisoformat(r["started_at"]) - t0).total_seconds()
+            else:
+                off = cursor
+            cursor = max(cursor, off + float(r["duration_s"]) + gap_s)
+            r["offset_s"] = round(off, 6)
+            (_folder(r["id"]) / "meta.json").write_text(json.dumps(r, indent=2), encoding="utf-8")
+        return recs
+
+
 def delete_source(source_id: str) -> None:
     shutil.rmtree(_folder(source_id))
 
@@ -118,7 +142,8 @@ def read_signals(
     result: dict[str, dict] = {}
     full = True
     for c in channels:
-        y = np.asarray(arr[c], dtype=float)
+        # DuckDB returns NULLs as a masked array; np.asarray would turn them into 0.0
+        y = np.ma.filled(np.ma.asarray(arr[c], dtype=float), np.nan)
         tt, yy, is_full = minmax_downsample(t, y, lo, hi, max(px, 16))
         full = full and is_full
         result[c] = {"t": np.round(tt + offset, 6).tolist(), "v": yy.tolist()}

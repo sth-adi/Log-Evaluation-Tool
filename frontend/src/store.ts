@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { api } from "./api";
 
-export type Channel = { name: string; unit: string; min: number; max: number };
+export type Channel = {
+  name: string;
+  unit: string;
+  min: number;
+  max: number;
+  states?: Record<string, string>; // text channels: value (index) to label
+};
 
 export type Source = {
   id: string;
@@ -9,6 +15,7 @@ export type Source = {
   kind: "ecu" | "hcu" | "other";
   filename: string;
   offset_s: number;
+  started_at: string | null; // wall-clock session start, from the log name
   duration_s: number;
   sample_rate_hz: number | null;
   rows: number;
@@ -31,6 +38,7 @@ type State = {
   importFiles: (files: File[]) => Promise<void>;
   setOffset: (id: string, offset: number) => Promise<void>;
   setKind: (id: string, kind: Source["kind"]) => Promise<void>;
+  arrange: (mode: "sequential" | "real") => Promise<void>;
   removeSource: (id: string) => Promise<void>;
   addLane: (s: LaneSeries, overlay: boolean) => void;
   removeLane: (id: number) => void;
@@ -91,6 +99,16 @@ export const useStore = create<State>((set, get) => ({
       await get().refresh();
     } catch (e) {
       set({ message: { kind: "error", text: (e as Error).message } });
+    }
+  },
+
+  arrange: async (mode) => {
+    try {
+      await api.arrange(mode);
+      await get().refresh();
+      set((s) => ({ rev: s.rev + 1, view: null }));
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not arrange the logs. ${(e as Error).message}` } });
     }
   },
 

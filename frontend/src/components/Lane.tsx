@@ -10,6 +10,10 @@ const RULE = "#333333";
 const FONT = '12px "Barlow Semi Condensed", system-ui, sans-serif';
 const SYNC = { key: "let", setSeries: false, scales: ["x", null] as [string, null] };
 
+export function stateLabel(states: Record<string, string> | undefined, v: number | null | undefined) {
+  return states && v != null ? states[String(Math.round(v))] : undefined;
+}
+
 export function formatValue(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "–";
   const a = Math.abs(v);
@@ -26,6 +30,7 @@ type Props = {
 export function Lane({ lane, colorOffset, isLast }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
+  const applyingRef = useRef(false); // true while we reload data, so the zoom store is left alone
   const [width, setWidth] = useState(0);
   const [readout, setReadout] = useState<{ t: number | null; v: (number | null)[] }>({ t: null, v: [] });
 
@@ -40,9 +45,9 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const meta = lane.series.map((s) => {
     const src = sources.find((x) => x.id === s.sourceId);
     const ch = src?.channels.find((c) => c.name === s.channel);
-    return { name: s.channel, unit: ch?.unit ?? "", source: src?.label ?? "" };
+    return { name: s.channel, unit: ch?.unit ?? "", source: src?.label ?? "", states: ch?.states };
   });
-  const title = meta.map((m) => m.name).join(", ");
+  const title = meta.map((m) => (m.unit ? `${m.name} (${m.unit})` : m.name)).join(", ");
 
   // Track the container width.
   useEffect(() => {
@@ -127,7 +132,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       hooks: {
         setScale: [
           (u, key) => {
-            if (key !== "x") return;
+            if (key !== "x" || applyingRef.current) return;
             const { min, max } = u.scales.x;
             if (min == null || max == null) return;
             const cur = useStore.getState().view;
@@ -209,9 +214,21 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
           return [g?.t ?? [], g?.v ?? []] as [number[], number[]];
         });
         const data = uPlot.join(tables);
-        plotRef.current.setData(data, false);
-      } catch {
-        /* the sidebar surfaces backend problems; keep the last good data */
+        const u = plotRef.current;
+        // A plain setData(data, false) keeps the zoom but leaves uPlot's visible-index range
+        // stuck on the empty placeholder data (only 2 points drawn, y never autoranged). Load
+        // the data normally, then restore the x window; y then autoranges to what is in view.
+        const { min: x0, max: x1 } = u.scales.x;
+        applyingRef.current = true;
+        try {
+          u.setData(data, true);
+          if (x0 != null && x1 != null) u.setScale("x", { min: x0, max: x1 });
+        } finally {
+          applyingRef.current = false;
+        }
+      } catch (err) {
+        // keep the last good data; log so plotting failures are not silent
+        console.error("Lane data update failed", err);
       }
     }, 80);
     return () => {
@@ -239,8 +256,8 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
               <small>{meta[i].source}</small>
             </span>
             <span className={solo ? "ro-val big" : "ro-val"}>
-              {formatValue(readout.v[i])}
-              <small>{meta[i].unit}</small>
+              {stateLabel(meta[i].states, readout.v[i]) ?? formatValue(readout.v[i])}
+              <small>{meta[i].states ? "" : meta[i].unit}</small>
             </span>
           </div>
         ))}
