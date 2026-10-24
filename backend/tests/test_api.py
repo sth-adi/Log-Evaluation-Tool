@@ -91,3 +91,24 @@ def test_arrange_orders_by_start_time(client):
     out = {r["id"]: r for r in client.post("/api/arrange", json={"mode": "real"}).json()}
     assert out[late["id"]]["offset_s"] == 3600
     assert client.post("/api/arrange", json={"mode": "x"}).status_code == 422
+
+
+def test_math_channels(client, synthetic):
+    ecu, _ = synthetic
+    src = client.post("/api/sources", files={"file": ("ecu.csv", ecu.to_csv(index=False).encode())}).json()
+    sid = src["id"]
+    r = client.post(f"/api/sources/{sid}/derived", json={"name": "rps", "expr": "RPM / 60", "unit": "Hz"})
+    assert r.status_code == 200
+    chan = next(c for c in r.json()["channels"] if c["name"] == "rps")
+    assert chan["derived"] and chan["unit"] == "Hz"
+    r2 = client.post(f"/api/sources/{sid}/derived", json={"name": "rps2", "expr": "rps * 2"})
+    assert r2.status_code == 200  # a formula can use another math channel
+    g = client.get(f"/api/sources/{sid}/signals", params={"channels": "RPM,rps,rps2", "px": 500}).json()
+    rpm, rps, rps2 = (g["channels"][k]["v"] for k in ("RPM", "rps", "rps2"))
+    assert rps[10] == pytest.approx(rpm[10] / 60) and rps2[10] == pytest.approx(rps[10] * 2)
+    # errors are reported, not raised
+    assert client.post(f"/api/sources/{sid}/derived", json={"name": "bad", "expr": "nope + 1"}).status_code == 422
+    assert client.post(f"/api/sources/{sid}/derived", json={"name": "RPM", "expr": "1"}).status_code == 422
+    assert client.delete(f"/api/sources/{sid}/derived/rps").status_code == 422  # rps2 uses it
+    assert client.delete(f"/api/sources/{sid}/derived/rps2").status_code == 200
+    assert client.delete(f"/api/sources/{sid}/derived/rps").status_code == 200

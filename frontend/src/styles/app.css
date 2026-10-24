@@ -347,3 +347,64 @@ select {
     grid-template-columns: minmax(0, 1fr) 150px;
   }
 }
+
+/* ---- arrange + math channels ------------------------------------------ */
+
+.arrange {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--rule);
+}
+.arrange button {
+  background: var(--black);
+  border: 1px solid var(--rule);
+  color: var(--chalk);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.arrange button:hover {
+  background: var(--steel);
+}
+
+.mathform {
+  margin: 8px 0;
+  color: var(--ash);
+  font-size: var(--t12);
+}
+.mathform summary {
+  cursor: pointer;
+}
+.mathform .fields {
+  margin: 8px 0 6px;
+}
+.mathform .formula {
+  display: grid;
+  gap: 3px;
+}
+.mathform .formula input {
+  background: var(--black);
+  border: 1px solid var(--rule);
+  padding: 4px 6px;
+  color: var(--chalk);
+  font-family: var(--font-mono, monospace);
+}
+.mathform button.primary {
+  margin-top: 6px;
+}
+
+.channels li {
+  display: flex;
+  align-items: stretch;
+}
+.channels li .channel {
+  flex: 1 1 auto;
+}
+.channels li.derived .channel {
+  color: var(--chalk);
+}
+.channels li .link {
+  padding: 0 8px;
+  border-top: 1px solid var(--rule);
+}

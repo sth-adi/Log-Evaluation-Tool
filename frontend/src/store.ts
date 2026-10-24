@@ -7,6 +7,8 @@ export type Channel = {
   min: number;
   max: number;
   states?: Record<string, string>; // text channels: value (index) to label
+  derived?: boolean; // a math channel
+  expr?: string;
 };
 
 export type Source = {
@@ -39,6 +41,8 @@ type State = {
   setOffset: (id: string, offset: number) => Promise<void>;
   setKind: (id: string, kind: Source["kind"]) => Promise<void>;
   arrange: (mode: "sequential" | "real") => Promise<void>;
+  addDerived: (id: string, name: string, expr: string, unit: string) => Promise<boolean>;
+  removeDerived: (id: string, name: string) => Promise<void>;
   removeSource: (id: string) => Promise<void>;
   addLane: (s: LaneSeries, overlay: boolean) => void;
   removeLane: (id: number) => void;
@@ -109,6 +113,32 @@ export const useStore = create<State>((set, get) => ({
       set((s) => ({ rev: s.rev + 1, view: null }));
     } catch (e) {
       set({ message: { kind: "error", text: `Could not arrange the logs. ${(e as Error).message}` } });
+    }
+  },
+
+  addDerived: async (id, name, expr, unit) => {
+    try {
+      await api.addDerived(id, { name, expr, unit });
+      await get().refresh();
+      set({ message: { kind: "info", text: `Added math channel ${name}.` } });
+      return true;
+    } catch (e) {
+      set({ message: { kind: "error", text: `Math channel not added. ${(e as Error).message}` } });
+      return false;
+    }
+  },
+
+  removeDerived: async (id, name) => {
+    try {
+      await api.removeDerived(id, name);
+      set((s) => ({
+        lanes: s.lanes
+          .map((l) => ({ ...l, series: l.series.filter((x) => !(x.sourceId === id && x.channel === name)) }))
+          .filter((l) => l.series.length > 0),
+      }));
+      await get().refresh();
+    } catch (e) {
+      set({ message: { kind: "error", text: (e as Error).message } });
     }
   },
 

@@ -38,6 +38,18 @@ export const api = {
       body: JSON.stringify({ mode, gap_s: mode === "sequential" ? 1 : 0 }),
     }).then((r) => parse<Source[]>(r)),
 
+  addDerived: (id: string, body: { name: string; expr: string; unit: string }) =>
+    fetch(`/api/sources/${id}/derived`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => parse<Source>(r)),
+
+  removeDerived: (id: string, name: string) =>
+    fetch(`/api/sources/${id}/derived/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) =>
+      parse<Source>(r),
+    ),
+
   remove: (id: string) => fetch(`/api/sources/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
 
   signals: (id: string, channels: string[], t0: number, t1: number, px: number) => {

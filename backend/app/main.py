@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import store
+from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
 
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
@@ -101,6 +102,32 @@ def delete_source(source_id: str) -> None:
         store.delete_source(source_id)
     except KeyError:
         raise HTTPException(404, "unknown source") from None
+
+
+class DerivedBody(BaseModel):
+    name: str
+    expr: str
+    unit: str = ""
+
+
+@app.post("/api/sources/{source_id}/derived")
+def add_derived(source_id: str, body: DerivedBody) -> dict:
+    try:
+        return store.add_derived(source_id, body.name, body.expr, body.unit)
+    except KeyError:
+        raise HTTPException(404, "unknown source") from None
+    except FormulaError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.delete("/api/sources/{source_id}/derived/{name}")
+def remove_derived(source_id: str, name: str) -> dict:
+    try:
+        return store.remove_derived(source_id, name)
+    except KeyError:
+        raise HTTPException(404, "unknown source or math channel") from None
+    except FormulaError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @app.get("/api/sources/{source_id}/signals")

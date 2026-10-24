@@ -19,6 +19,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from . import derived as derived_mod
 from .downsample import minmax_downsample
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -110,6 +111,120 @@ def delete_source(source_id: str) -> None:
     shutil.rmtree(_folder(source_id))
 
 
+def _query_window(
+    source_id: str, cols: list[str], lo: float, hi: float
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """time_s plus the named channels for [lo, hi] (None bounds = everything), NULLs as NaN."""
+    sel = ", ".join(f'"{c}"' for c in cols)
+    con = duckdb.connect()
+    try:
+        arr = con.execute(
+            f"SELECT {sel} FROM read_parquet(?) WHERE time_s >= ? AND time_s <= ? ORDER BY time_s",
+            [str(_folder(source_id) / "data.parquet"), lo, hi],
+        ).fetchnumpy()
+    finally:
+        con.close()
+    t = np.asarray(arr["time_s"], dtype=float)
+    # DuckDB returns NULLs as a masked array; np.asarray would turn them into 0.0
+    out = {c: np.ma.filled(np.ma.asarray(arr[c], dtype=float), np.nan) for c in cols if c != "time_s"}
+    return t, out
+
+
+def _eval_derived(
+    source_id: str, rec: dict, derived: dict[str, dict], wanted: list[str]
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Full-length arrays for the wanted derived channels, resolving chains of formulas."""
+    base_names = {c["name"] for c in rec["channels"]} - set(derived)
+    known = base_names | set(derived)
+    need: set[str] = set()
+
+    def collect(name: str, seen: tuple[str, ...] = ()) -> None:
+        if name in seen:
+            raise derived_mod.FormulaError(f"Circular formula involving '{name}'")
+        if name in derived:
+            for dep in derived_mod.referenced_names(derived[name]["expr"]) & known:
+                collect(dep, (*seen, name))
+        else:
+            need.add(name)
+
+    for w in wanted:
+        collect(w)
+    t, cols = _query_window(source_id, ["time_s", *sorted(need)], -np.inf, np.inf)
+    memo: dict[str, np.ndarray] = dict(cols)
+
+    def get(name: str) -> np.ndarray:
+        if name not in memo:
+            expr = derived[name]["expr"]
+            env = {n: get(n) for n in derived_mod.referenced_names(expr) & known}
+            memo[name] = derived_mod.evaluate(expr, env, t)
+        return memo[name]
+
+    return t, {w: get(w) for w in wanted}
+
+
+def _window_with_derived(
+    source_id: str, rec: dict, channels: list[str], derived: dict[str, dict], lo: float, hi: float
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    want_derived = [c for c in channels if c in derived]
+    t, dvals = _eval_derived(source_id, rec, derived, want_derived)
+    mask = (t >= lo) & (t <= hi)
+    base = [c for c in channels if c not in derived]
+    _, bvals = _query_window(source_id, ["time_s", *base], lo, hi)
+    out = {c: dvals[c][mask] for c in want_derived}
+    out.update(bvals)
+    return t[mask], out
+
+
+def add_derived(source_id: str, name: str, expr: str, unit: str = "") -> dict:
+    """Add a math channel. Raises FormulaError if the formula is invalid."""
+    name = name.strip()
+    with _lock:
+        rec = get_source(source_id)
+        if not name or len(name) > 60 or "," in name:
+            raise derived_mod.FormulaError("Name must be 1-60 characters and contain no comma")
+        if name == "time_s" or any(c["name"] == name for c in rec["channels"]):
+            raise derived_mod.FormulaError(f"A channel called '{name}' already exists")
+        derived = {d["name"]: d for d in rec.get("derived", [])}
+        entry = {"name": name, "expr": expr.strip(), "unit": unit.strip()}
+        derived[name] = entry
+        _, vals = _eval_derived(source_id, rec, derived, [name])
+        y = vals[name]
+        if not np.isfinite(y).any():
+            raise derived_mod.FormulaError("Formula produced no valid values")
+        rec.setdefault("derived", []).append(entry)
+        rec["channels"].append(
+            {
+                "name": name,
+                "unit": entry["unit"],
+                "min": float(np.nanmin(y)),
+                "max": float(np.nanmax(y)),
+                "derived": True,
+                "expr": entry["expr"],
+            }
+        )
+        (_folder(source_id) / "meta.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        return rec
+
+
+def remove_derived(source_id: str, name: str) -> dict:
+    with _lock:
+        rec = get_source(source_id)
+        derived = rec.get("derived", [])
+        if not any(d["name"] == name for d in derived):
+            raise KeyError(name)
+        users = [
+            d["name"]
+            for d in derived
+            if d["name"] != name and name in derived_mod.referenced_names(d["expr"])
+        ]
+        if users:
+            raise derived_mod.FormulaError(f"'{name}' is used by {', '.join(users)}")
+        rec["derived"] = [d for d in derived if d["name"] != name]
+        rec["channels"] = [c for c in rec["channels"] if c["name"] != name]
+        (_folder(source_id) / "meta.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        return rec
+
+
 def read_signals(
     source_id: str, channels: list[str], t0: float | None, t1: float | None, px: int
 ) -> dict:
@@ -123,27 +238,18 @@ def read_signals(
 
     lo = (t0 if t0 is not None else -np.inf) - offset
     hi = (t1 if t1 is not None else np.inf) - offset
-    cols = ", ".join(f'"{c}"' for c in channels)
-    con = duckdb.connect()
-    try:
-        # one-sample margin is added in minmax_downsample, so over-fetch slightly
-        pad = 2.0 / max(float(rec.get("sample_rate_hz") or 1.0), 1e-6)
-        q = (
-            f"SELECT time_s, {cols} FROM read_parquet(?) "
-            "WHERE time_s >= ? AND time_s <= ? ORDER BY time_s"
-        )
-        arr = con.execute(
-            q, [str(_folder(source_id) / "data.parquet"), lo - pad, hi + pad]
-        ).fetchnumpy()
-    finally:
-        con.close()
+    # one-sample margin is added in minmax_downsample, so over-fetch slightly
+    pad = 2.0 / max(float(rec.get("sample_rate_hz") or 1.0), 1e-6)
+    derived = {d["name"]: d for d in rec.get("derived", [])}
+    if any(c in derived for c in channels):
+        t, arr = _window_with_derived(source_id, rec, channels, derived, lo - pad, hi + pad)
+    else:
+        t, arr = _query_window(source_id, ["time_s", *channels], lo - pad, hi + pad)
 
-    t = np.asarray(arr["time_s"], dtype=float)
     result: dict[str, dict] = {}
     full = True
     for c in channels:
-        # DuckDB returns NULLs as a masked array; np.asarray would turn them into 0.0
-        y = np.ma.filled(np.ma.asarray(arr[c], dtype=float), np.nan)
+        y = arr[c]
         tt, yy, is_full = minmax_downsample(t, y, lo, hi, max(px, 16))
         full = full and is_full
         result[c] = {"t": np.round(tt + offset, 6).tolist(), "v": yy.tolist()}

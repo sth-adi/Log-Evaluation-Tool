@@ -236,7 +236,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seriesKey, windowKey, rev, width > 50, sources.length]);
+  }, [seriesKey, windowKey, rev, width > 50, sources.length, isLast]); // isLast: the plot is rebuilt empty when it changes
 
   const solo = lane.series.length === 1;
 
