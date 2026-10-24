@@ -225,3 +225,33 @@ def test_export_csv_and_parquet_round_trip(client, synthetic):
 
     assert client.get("/api/sources/nope/export").status_code == 404
     assert client.get(f"/api/sources/{src['id']}/export", params={"format": "xlsx"}).status_code == 422
+
+
+def test_summary_endpoint_conditions_windows_and_errors(client, synthetic):
+    ecu, _ = synthetic
+    a = _upload(client, ecu, label="A").json()["id"]
+    b = _upload(client, ecu.assign(RPM=ecu["RPM"] + 1000), label="B").json()["id"]
+    metrics = [
+        {"name": "Peak RPM", "expr": "RPM", "agg": "max"},
+        {"name": "Mean RPM at full throttle", "expr": "RPM", "agg": "mean", "where": "TPS > 90"},
+        {"name": "Seconds at full throttle", "expr": "TPS", "agg": "seconds", "where": "TPS > 90"},
+    ]
+    r = client.post("/api/summary", json={"sources": [a, b], "metrics": metrics}).json()
+    ra, rb = r["rows"]
+    assert rb["values"]["Peak RPM"] == pytest.approx(ra["values"]["Peak RPM"] + 1000)
+    assert rb["values"]["Mean RPM at full throttle"] == pytest.approx(ra["values"]["Mean RPM at full throttle"] + 1000)
+    assert ra["values"]["Seconds at full throttle"] > 0
+    # a time window narrows the answer
+    w = client.post("/api/summary", json={"sources": [a], "metrics": metrics[:1], "t0": 0, "t1": 5}).json()
+    assert w["rows"][0]["values"]["Peak RPM"] < ra["values"]["Peak RPM"]
+    # a typo in a formula is reported, not shown as a column of blanks
+    bad = client.post("/api/summary", json={"sources": [a, b], "metrics": [{"name": "x", "expr": "RPMM", "agg": "max"}]})
+    assert bad.status_code == 422 and "x" in bad.json()["detail"]
+    assert client.post("/api/summary", json={"sources": [a], "metrics": []}).status_code == 422
+    assert client.post("/api/summary", json={"sources": [a], "metrics": [{"name": "x", "expr": "RPM", "agg": "mode"}]}).status_code == 422
+    # a channel that only one log has leaves a blank for the other, with a note
+    only_a = ecu.assign(Extra=1.0)
+    c = _upload(client, only_a, label="C").json()["id"]
+    mixed = client.post("/api/summary", json={"sources": [a, c], "metrics": [{"name": "Extra max", "expr": "Extra", "agg": "max"}]}).json()
+    assert mixed["rows"][0]["values"]["Extra max"] is None and mixed["rows"][1]["values"]["Extra max"] == 1.0
+    assert a in mixed["errors"]["Extra max"]

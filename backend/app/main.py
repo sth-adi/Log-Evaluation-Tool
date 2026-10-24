@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, laps, lifeview, live, pulls, report, store, workspaces
+from . import analysis, laps, lifeview, live, pulls, report, store, summary, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
@@ -385,6 +385,58 @@ def channel_spectrum(
         return analysis.spectrum(t, arr[channel])
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+
+
+class MetricBody(BaseModel):
+    name: str
+    expr: str
+    agg: str = "max"
+    where: str = ""
+    unit: str = ""
+
+
+class SummaryBody(BaseModel):
+    sources: list[str]
+    metrics: list[MetricBody]
+    t0: float | None = None
+    t1: float | None = None
+
+
+@app.post("/api/summary")
+def run_summary(body: SummaryBody) -> dict:
+    """One row per log, one column per metric: a formula, an aggregate, and an optional condition."""
+    if not body.metrics:
+        raise HTTPException(422, "Add at least one metric")
+    if len(body.metrics) > 30 or len(body.sources) > 40:
+        raise HTTPException(422, "Too many metrics or logs")
+    for m in body.metrics:
+        if m.agg not in summary.AGGS:
+            raise HTTPException(422, f"'{m.agg}' is not an aggregate")
+    rows, errors = [], {}
+    for sid in body.sources:
+        try:
+            rec = store.get_source(sid)
+        except KeyError:
+            continue
+        offset = float(rec.get("offset_s", 0.0))
+        vals: dict[str, float | None] = {}
+        for m in body.metrics:
+            try:
+                t, v = store._rule_flag(sid, rec, m.expr)
+                w = store._rule_flag(sid, rec, m.where)[1] if m.where.strip() else None
+                lo = (body.t0 - offset) if body.t0 is not None else -np.inf
+                hi = (body.t1 - offset) if body.t1 is not None else np.inf
+                win = (t >= lo) & (t <= hi)
+                vals[m.name] = summary.aggregate(t[win], v[win], None if w is None else w[win], m.agg)
+            except FormulaError as e:
+                vals[m.name] = None
+                errors.setdefault(m.name, {})[sid] = str(e)
+        rows.append({"id": sid, "label": rec["label"], "started_at": rec.get("started_at"), "values": vals})
+    for m in body.metrics:  # a formula that fails everywhere is the person's typo, not a missing channel in one log
+        bad = errors.get(m.name, {})
+        if rows and len(bad) == len(rows):
+            raise HTTPException(422, f"{m.name}: {next(iter(bad.values()))}")
+    return {"metrics": [m.model_dump() for m in body.metrics], "rows": rows, "errors": errors}
 
 
 @app.get("/api/heatmap")

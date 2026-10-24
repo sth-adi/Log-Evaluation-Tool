@@ -57,6 +57,15 @@ Dyno and bench logs have no start/finish line, so the tab says so instead of gue
 - **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
 - **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 
+## Summary
+
+Analysis > **Summary** gives one row per log and one column per metric, so runs can be compared at a glance. A metric is a channel, an aggregate (highest, lowest, average, median, 95th percentile, spread, first, last, total, or seconds), and an optional **only when** condition written with channel names, for example average `lam1` only when `tps1 > 90`.
+
+- **Quick add** suggests common metrics (peak RPM, top speed, average lambda at full throttle, time at full throttle, hottest coolant, lowest battery voltage) for the channels your logs have.
+- **Compare to** picks one log as the baseline and shows how far each other log is from it under every value.
+- The zoomed window is respected, so you can compare just one stretch of each run.
+- Metrics are remembered in this browser and saved with a view, so a teammate who opens your view file gets the same table.
+
 ## Heatmap
 
 Analysis > **Heatmap** puts samples from every open log on an x/y grid, for example RPM across and throttle up.

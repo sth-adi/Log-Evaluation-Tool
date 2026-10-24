@@ -66,3 +66,21 @@ def test_heatmap_hides_thin_cells_and_validates():
     with pytest.raises(ValueError):
         analysis.heatmap(x, y, None, agg="median")
     assert analysis.heatmap(np.array([np.nan]), np.array([1.0]), None)["total"] == 0
+
+
+def test_summary_aggregates_with_and_without_a_condition():
+    from backend.app import summary
+
+    t = np.arange(0, 10, 0.5)
+    v = np.arange(len(t), dtype=float)
+    on = (t >= 5).astype(float)
+    assert summary.aggregate(t, v, None, "max") == 19 and summary.aggregate(t, v, None, "first") == 0
+    assert summary.aggregate(t, v, on, "min") == 10  # the first sample at or after t = 5
+    assert summary.aggregate(t, v, on, "mean") == pytest.approx(14.5)
+    assert summary.aggregate(t, v, on, "seconds") == pytest.approx(5.0)
+    assert summary.aggregate(t, v, on, "last") == 19
+    assert summary.aggregate(t, v, np.zeros(len(t)), "max") is None  # nothing qualifies
+    assert summary.aggregate(t, v, np.zeros(len(t)), "seconds") == 0.0
+    assert summary.aggregate(t, np.where(v < 3, np.nan, v), None, "min") == 3  # NaN is ignored
+    with pytest.raises(ValueError):
+        summary.aggregate(t, v, None, "mode")

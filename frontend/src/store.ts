@@ -58,8 +58,11 @@ export type ConvertView = {
 export type Rule = { name: string; expr: string; min_duration_s: number; merge_gap_s: number };
 
 /** What a saved view remembers. It names channels, not logs, so it fits whichever logs are open. */
+export type Metric = { id: string; name: string; expr: string; agg: string; where: string; unit: string };
+
 export type ViewPayload = {
   v: 1;
+  summary?: Metric[];
   mode: "plots" | "analysis" | "laps" | "pulls";
   lanes: string[][];
   lap: { params: LapParams; axis: "distance" | "time" };
@@ -92,6 +95,8 @@ type State = {
   recent: string[]; // channels plotted lately, newest first
   addDerivedAll: (name: string, expr: string, unit: string) => Promise<boolean>;
   removeDerivedAll: (name: string) => Promise<void>;
+  metrics: Metric[];
+  setMetrics: (m: Metric[]) => void;
   lapParams: LapParams;
   setLapParams: (p: LapParams) => void;
   lapAxis: "distance" | "time";
@@ -162,7 +167,26 @@ function saveRecent(r: string[]) {
 const guessKind = (name: string): Source["kind"] =>
   /hcu/i.test(name) ? "hcu" : /ecu|f88/i.test(name) ? "ecu" : "other";
 
+const METRICS_KEY = "let.metrics";
+function loadMetrics(): Metric[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(METRICS_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((m) => m && typeof m.name === "string" && typeof m.expr === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export const useStore = create<State>((set, get) => ({
+  metrics: loadMetrics(),
+  setMetrics: (metrics) => {
+    set({ metrics });
+    try {
+      localStorage.setItem(METRICS_KEY, JSON.stringify(metrics));
+    } catch {
+      /* private window: the metrics just will not be remembered */
+    }
+  },
   lapParams: { method: "auto" },
   setLapParams: (lapParams) => set({ lapParams }),
   lapAxis: "distance",
@@ -187,6 +211,7 @@ export const useStore = create<State>((set, get) => ({
       mode: s.mode === "live" ? "plots" : s.mode, // a live screen is not something to come back to
       lanes: s.lanes.map((l) => [...new Set(l.series.map((x) => x.channel))]),
       lap: { params: s.lapParams, axis: s.lapAxis },
+      ...(s.metrics.length ? { summary: s.metrics } : {}),
     };
     try {
       const rec = await api.saveView(name, payload);
@@ -209,6 +234,7 @@ export const useStore = create<State>((set, get) => ({
       missing += lane.length - here.length;
       here.forEach((c, i) => get().addChannelAll(c, i > 0));
     }
+    if (Array.isArray(p?.summary)) get().setMetrics(p.summary.filter((m) => m && typeof m.name === "string" && typeof m.expr === "string"));
     const mode = p?.mode === "analysis" || p?.mode === "laps" || p?.mode === "pulls" ? p.mode : "plots";
     set({
       mode,

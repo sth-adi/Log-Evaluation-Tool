@@ -1710,3 +1710,89 @@ pre.code {
 .heat-note {
   margin-left: auto;
 }
+
+/* ---- summary -------------------------------------------------------------- */
+
+.summary {
+  padding: 12px 16px 24px;
+}
+.summary-build {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.summary-build label.inline,
+.summary-tools label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.summary-build label.grow {
+  flex: 1 1 280px;
+}
+.summary-build label.grow input {
+  flex: 1;
+  min-width: 0;
+}
+.summary .chips {
+  padding: 10px 0 0;
+  border: 0;
+  align-items: center;
+}
+.summary-tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 14px 0 8px;
+}
+.summary-scroll {
+  overflow: auto;
+}
+.summary-table th,
+.summary-table td {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+.summary-table thead th {
+  vertical-align: bottom;
+  white-space: normal;
+  min-width: 120px;
+}
+.summary-table .metric-name {
+  display: inline-block;
+  max-width: 190px;
+}
+.summary-table tbody th small {
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
+}
+.summary-table tr.ref th,
+.summary-table tr.ref td {
+  background: var(--red-soft);
+}
+.bar-cell {
+  position: relative;
+  background-image: linear-gradient(90deg, rgb(255 255 255 / 0.07) var(--w), transparent var(--w));
+  background-repeat: no-repeat;
+  background-size: 100% 3px;
+  background-position: left bottom;
+}
+.bar-cell small {
+  display: block;
+  font-size: var(--t12);
+  color: var(--muted);
+}
+.bar-cell small.up {
+  color: #ffb020;
+}
+.bar-cell small.down {
+  color: #38c8f0;
+}
+.icon-btn.x {
+  margin-left: 4px;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+}

@@ -1,4 +1,4 @@
-import type { ConvertJob, ConvertStatus, LibraryEntry, SavedView, Source, ViewPayload } from "./store";
+import type { ConvertJob, ConvertStatus, LibraryEntry, Metric, SavedView, Source, ViewPayload } from "./store";
 
 async function parse<T>(r: Response): Promise<T> {
   if (!r.ok) {
@@ -105,6 +105,12 @@ export type Heatmap = {
   dt_s: number;
 };
 
+export type SummaryData = {
+  metrics: { name: string; expr: string; agg: string; where: string; unit: string }[];
+  rows: { id: string; label: string; started_at: string | null; values: Record<string, number | null> }[];
+  errors: Record<string, Record<string, string>>;
+};
+
 export type LiveChannel = { name: string; unit: string; last: number | null };
 export type LiveStatus = {
   state: "running" | "stopped";
@@ -158,6 +164,13 @@ const lapQuery = (p: LapParams) => ({
 });
 
 export const api = {
+  summary: (ids: string[], metrics: Metric[], t0?: number, t1?: number) =>
+    fetch("/api/summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources: ids, metrics: metrics.map(({ name, expr, agg, where, unit }) => ({ name, expr, agg, where, unit })), t0, t1 }),
+    }).then((r) => parse<SummaryData>(r)),
+
   heatmap: (
     ids: string[],
     o: { x: string; y: string; value?: string; agg: string; nx: number; ny: number; minCount: number; t0?: number; t1?: number },
