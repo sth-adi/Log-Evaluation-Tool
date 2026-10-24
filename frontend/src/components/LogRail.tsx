@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { useStore, type Source } from "../store";
+import { extentOf, useStore, type Source } from "../store";
 import { dayLabel, spansDays } from "../time";
 
 /** "2025-11-19 11-53-32 plus 0h00m00s F88#12357 Dyno run final ALL" -> "F88#12357 Dyno run final" */
@@ -108,7 +108,10 @@ export function LogDrawer() {
   const closeLog = useStore((s) => s.closeLog);
   const addDerivedAll = useStore((s) => s.addDerivedAll);
   const removeDerivedAll = useStore((s) => s.removeDerivedAll);
+  const lanes = useStore((s) => s.lanes);
+  const view = useStore((s) => s.view);
   const src = sources.find((s) => s.id === id);
+  const [onlyPlotted, setOnlyPlotted] = useState(false);
 
   const [name, setName] = useState("");
   const [expr, setExpr] = useState("");
@@ -123,6 +126,21 @@ export function LogDrawer() {
   }, [id, setManaging]);
 
   if (!src) return null;
+  const plotted = [...new Set(lanes.flatMap((l) => l.series.filter((x) => x.sourceId === src.id).map((x) => x.channel)))];
+  const [e0, e1] = extentOf(sources);
+  const zoomed = view != null && (Math.abs(view[0] - e0) > 1e-6 || Math.abs(view[1] - e1) > 1e-6);
+  const canCut = plotted.length > 0;
+  const exportUrl = (format: string) => {
+    const q = new URLSearchParams({ format });
+    if (onlyPlotted && canCut) {
+      q.set("channels", plotted.join(","));
+      if (zoomed && view) {
+        q.set("t0", String(view[0]));
+        q.set("t1", String(view[1]));
+      }
+    }
+    return `/api/sources/${src.id}/export?${q}`;
+  };
   const math = src.channels.filter((c) => c.derived);
   const submit = async () => {
     if (!name.trim() || !expr.trim() || busy) return;
@@ -229,6 +247,23 @@ export function LogDrawer() {
             <button className="btn primary" onClick={() => void submit()} disabled={busy || !name.trim() || !expr.trim()}>
               {sources.length > 1 ? `Add to all ${sources.length} logs` : "Add channel"}
             </button>
+          </div>
+        </section>
+
+        <section className="drawer-sec">
+          <h3>Download the data</h3>
+          <p className="hint">Take this log into Excel, MATLAB or Python. Calculated channels are included, and time starts at zero.</p>
+          <label className="check-row">
+            <input type="checkbox" checked={onlyPlotted && canCut} disabled={!canCut} onChange={(e) => setOnlyPlotted(e.target.checked)} />
+            Only the plotted channels{zoomed ? " in the zoomed window" : ""}
+          </label>
+          <div className="row">
+            <a className="btn" href={exportUrl("csv")} download>
+              CSV
+            </a>
+            <a className="btn" href={exportUrl("parquet")} download title="Compact and fast to load in pandas, Polars and DuckDB">
+              Parquet
+            </a>
           </div>
         </section>
 

@@ -198,3 +198,30 @@ def test_real_mode_keeps_overlaps_and_short_gaps(client):
     assert out[a["id"]] == 0 and out[b["id"]] == 30       # overlap kept
     assert out[c["id"]] == 300                            # short gap kept
     assert out[d["id"]] == pytest.approx(300 + 59.9 + 1200, abs=0.2)   # the day in between is shortened
+
+
+def test_export_csv_and_parquet_round_trip(client, synthetic):
+    import io as _io
+
+    import pandas as pd
+
+    ecu, _ = synthetic
+    src = _upload(client, ecu, label="ECU run").json()
+    client.post(f"/api/sources/{src['id']}/derived", json={"name": "rpm_k", "expr": "RPM / 1000", "unit": ""})
+
+    r = client.get(f"/api/sources/{src['id']}/export", params={"format": "csv"})
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    back = pd.read_csv(_io.BytesIO(r.content))
+    assert list(back.columns[:2]) == ["time_s", "RPM"] and "rpm_k" in back.columns
+    assert len(back) == len(ecu)
+    assert back["rpm_k"].iloc[10] == pytest.approx(ecu["RPM"].iloc[10] / 1000)
+
+    # a cut-down export: two channels, a time window; log time, not the shared timeline
+    client.patch(f"/api/sources/{src['id']}", json={"offset_s": 100.0})
+    r = client.get(f"/api/sources/{src['id']}/export", params={"format": "parquet", "channels": "RPM,TPS", "t0": 105, "t1": 110})
+    cut = pd.read_parquet(_io.BytesIO(r.content))
+    assert list(cut.columns) == ["time_s", "RPM", "TPS"]
+    assert cut["time_s"].min() >= 5 - 1e-9 and cut["time_s"].max() <= 10 + 1e-9
+
+    assert client.get("/api/sources/nope/export").status_code == 404
+    assert client.get(f"/api/sources/{src['id']}/export", params={"format": "xlsx"}).status_code == 422

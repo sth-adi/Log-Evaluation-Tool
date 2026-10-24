@@ -12,9 +12,13 @@ import os
 import sys
 from pathlib import Path
 
+import io
+import re
+
 import numpy as np
+import pandas as pd
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -274,6 +278,38 @@ def events(source_id: str) -> list[dict]:
         raise HTTPException(404, "unknown source") from None
     except FormulaError as e:
         raise HTTPException(422, str(e)) from e
+
+
+@app.get("/api/sources/{source_id}/export")
+def export_source(
+    source_id: str,
+    format: str = Query("csv", pattern="^(csv|parquet)$"),
+    channels: str = Query("", description="comma-separated channel names; empty means all"),
+    t0: float | None = None,
+    t1: float | None = None,
+) -> Response:
+    """The log's data (calculated channels included) as a CSV or Parquet file, optionally cut down."""
+    try:
+        rec = store.get_source(source_id)
+    except KeyError:
+        raise HTTPException(404, "unknown source") from None
+    names = [c for c in channels.split(",") if c] or [c["name"] for c in rec["channels"]]
+    t, arr = _window(source_id, names, t0, t1)
+    # log time starts at zero in the file, whatever offset the log has on the shared timeline
+    df = pd.DataFrame({"time_s": t - float(rec.get("offset_s", 0.0)), **{n: arr[n] for n in names}})
+    buf = io.BytesIO()
+    if format == "parquet":
+        df.to_parquet(buf, index=False)
+        media = "application/octet-stream"
+    else:
+        df.to_csv(buf, index=False, encoding="utf-8")
+        media = "text/csv; charset=utf-8"
+    stem = re.sub(r"[^\w.\- ]+", "_", rec["label"]).strip()[:80] or "log"
+    return Response(
+        buf.getvalue(),
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{stem}.{format}"'},
+    )
 
 
 @app.get("/api/sources/{source_id}/report", response_class=HTMLResponse)

@@ -1512,3 +1512,25 @@ label {
   padding-top: 7px;
   padding-bottom: 7px;
 }
+
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: var(--t13);
+  color: var(--muted);
+}
+.check-row input {
+  accent-color: var(--red);
+}
+a.btn,
+a.btn:visited {
+  color: var(--text);
+}
