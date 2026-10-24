@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Analysis } from "./components/Analysis";
 import { ConvertDialog } from "./components/ConvertDialog";
 import { Lane, channelGroups } from "./components/Lane";
+import { Library } from "./components/Library";
 import { LogDrawer, LogRail } from "./components/LogRail";
 import { Palette } from "./components/Palette";
 import { extentOf, useStore } from "./store";
@@ -18,6 +19,9 @@ export default function App() {
   const importFiles = useStore((s) => s.importFiles);
   const clearMessage = useStore((s) => s.clearMessage);
   const setPalette = useStore((s) => s.setPalette);
+  const library = useStore((s) => s.library);
+  const loadLibrary = useStore((s) => s.loadLibrary);
+  const setLibraryOpen = useStore((s) => s.setLibraryOpen);
   const addChannelAll = useStore((s) => s.addChannelAll);
   const view = useStore((s) => s.view);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -42,7 +46,8 @@ export default function App() {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void loadLibrary();
+  }, [refresh, loadLibrary]);
 
   // "/" or Ctrl+K opens the channel search from anywhere that is not a text box.
   useEffect(() => {
@@ -112,6 +117,9 @@ export default function App() {
           </button>
         )}
         <div className="spacer" />
+        <button className="btn" onClick={() => setLibraryOpen(true)} title="Every log you have converted or imported">
+          Library{library.length > 0 && <span className="count">{library.length}</span>}
+        </button>
         {lanes.length > 0 && (
           <button className="btn" onClick={openReports} title="Open a printable report of the plotted channels">
             Report
@@ -144,6 +152,11 @@ export default function App() {
             <button className="btn primary lg" onClick={() => fileRef.current?.click()}>
               Choose files
             </button>
+            {library.length > 0 && (
+              <button className="btn lg" onClick={() => setLibraryOpen(true)}>
+                Open from the library ({library.length})
+              </button>
+            )}
           </div>
         ) : mode === "analysis" ? (
           <Analysis />
@@ -181,6 +194,7 @@ export default function App() {
       <Palette />
       <LogDrawer />
       <ConvertDialog />
+      <Library />
 
       {message && (
         <div className={`toast ${message.kind}`} role={message.kind === "error" ? "alert" : "status"}>

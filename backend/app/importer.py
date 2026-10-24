@@ -18,6 +18,7 @@ A mapping profile is a plain dict (stored as JSON) with optional keys:
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
 from dataclasses import dataclass, field
@@ -172,6 +173,16 @@ def _guess_unit(name: str) -> str:
         if rx.search(low):
             return u
     return ""
+
+
+def content_sha(raw: bytes) -> str:
+    """Fingerprint of the table in a CSV (header and rows), ignoring the text lines above it.
+
+    The same log exported twice, or from another folder, has the same fingerprint even though the
+    path written on its first line differs.
+    """
+    text, _delim, _skipped = _split_preamble(_decode(raw))
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
 
 
 def parse_csv(raw: bytes, profile: dict | None = None, filename: str = "") -> ParsedLog:
@@ -345,6 +356,7 @@ def parse_csv(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
 
     inv_rename = {v: k for k, v in rename.items()}
     meta = {
+        "content_sha": content_sha(raw),
         "started_at": find_start_time(preamble, filename),
         "rows": int(len(out)),
         "channels": [

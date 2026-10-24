@@ -26,6 +26,22 @@ export type Source = {
   assumptions: string[];
   warnings: string[];
   rules?: Rule[];
+  open?: boolean;
+  reused?: boolean; // the same data was already in the library
+};
+
+export type LibraryEntry = {
+  id: string;
+  label: string;
+  filename: string;
+  started_at: string | null;
+  imported_at: string;
+  duration_s: number;
+  rows: number;
+  channels: number;
+  open: boolean;
+  from_lrd: boolean;
+  size_bytes: number;
 };
 
 export type ConvertStatus = { available: boolean; reason: string; lifeview_open: boolean };
@@ -47,6 +63,14 @@ export type Lane = { id: number; series: LaneSeries[] };
 type State = {
   sources: Source[];
   lanes: Lane[];
+  library: LibraryEntry[];
+  libraryOpen: boolean;
+  setLibraryOpen: (open: boolean) => void;
+  loadLibrary: () => Promise<void>;
+  addFromLibrary: (ids: string[]) => Promise<void>;
+  closeLog: (id: string) => Promise<void>;
+  deleteForever: (id: string) => Promise<void>;
+  openLibraryFolder: () => Promise<void>;
   convert: ConvertView | null;
   openConvert: (files: File[]) => Promise<void>;
   startConvert: () => Promise<void>;
@@ -81,6 +105,22 @@ type State = {
 
 let laneId = 1;
 
+/** Keep every plot in step with the logs in view: add a log that joined, drop one that left. */
+function syncLanes(lanes: Lane[], sources: Source[]): Lane[] {
+  const ids = new Set(sources.map((s) => s.id));
+  return lanes
+    .map((l) => {
+      const kept = l.series.filter((x) => ids.has(x.sourceId));
+      const have = new Set(kept.map((x) => `${x.sourceId}|${x.channel}`));
+      const add: LaneSeries[] = [];
+      for (const ch of new Set(l.series.map((x) => x.channel)))
+        for (const src of [...sources].sort((a, b) => a.offset_s - b.offset_s))
+          if (src.channels.some((c) => c.name === ch) && !have.has(`${src.id}|${ch}`)) add.push({ sourceId: src.id, channel: ch });
+      return add.length || kept.length !== l.series.length ? { ...l, series: [...kept, ...add] } : l;
+    })
+    .filter((l) => l.series.length > 0);
+}
+
 const RECENT_KEY = "let.recent";
 function loadRecent(): string[] {
   try {
@@ -107,6 +147,60 @@ export const useStore = create<State>((set, get) => ({
   view: null,
   mode: "plots",
   setMode: (mode) => set({ mode }),
+  library: [],
+  libraryOpen: false,
+  setLibraryOpen: (libraryOpen) => {
+    set({ libraryOpen });
+    if (libraryOpen) void get().loadLibrary();
+  },
+  loadLibrary: async () => {
+    try {
+      set({ library: await api.library() });
+    } catch {
+      /* the library is a convenience; the sources list already reports a dead backend */
+    }
+  },
+  addFromLibrary: async (ids) => {
+    try {
+      for (const id of ids) await api.libraryOpen(id);
+      await get().refresh();
+      if (get().sources.length > 1) await get().arrange("sequential");
+      await get().loadLibrary();
+      set({
+        libraryOpen: false,
+        message: { kind: "info", text: `Added ${ids.length} log${ids.length > 1 ? "s" : ""} from the library.` },
+      });
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not add from the library. ${(e as Error).message}` } });
+    }
+  },
+  closeLog: async (id) => {
+    try {
+      await api.libraryClose(id);
+      set((s) => ({
+        lanes: s.lanes
+          .map((l) => ({ ...l, series: l.series.filter((x) => x.sourceId !== id) }))
+          .filter((l) => l.series.length > 0),
+        view: null,
+      }));
+      await get().refresh();
+      await get().loadLibrary();
+    } catch (e) {
+      set({ message: { kind: "error", text: (e as Error).message } });
+    }
+  },
+  deleteForever: async (id) => {
+    await get().removeSource(id);
+    await get().loadLibrary();
+  },
+  openLibraryFolder: async () => {
+    try {
+      await api.libraryFolder();
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not open the folder. ${(e as Error).message}` } });
+    }
+  },
+
   convert: null,
 
   openConvert: async (files) => {
@@ -130,6 +224,7 @@ export const useStore = create<State>((set, get) => ({
         set((s) => (s.convert ? { convert: { ...s.convert, job } } : s));
       }
       await get().refresh();
+      void get().loadLibrary();
       if (get().sources.length > 1 && job.imported > 0) await get().arrange("sequential");
       set((s) => (s.convert ? { convert: { ...s.convert, phase: "finished", job } } : s));
     } catch (e) {
@@ -197,7 +292,8 @@ export const useStore = create<State>((set, get) => ({
 
   refresh: async () => {
     try {
-      set({ sources: await api.sources() });
+      const sources = await api.sources();
+      set((s) => ({ sources, lanes: syncLanes(s.lanes, sources) }));
     } catch (e) {
       set({ message: { kind: "error", text: `Could not reach the backend: ${(e as Error).message}` } });
     }
@@ -213,7 +309,9 @@ export const useStore = create<State>((set, get) => ({
         set({
           message: {
             kind: "info",
-            text: `Imported ${f.name}: ${src.rows.toLocaleString()} rows, ${src.channels.length} channels.`,
+            text: src.reused
+              ? `${f.name} was already in your library, so that log was opened instead of copied.`
+              : `Imported ${f.name}: ${src.rows.toLocaleString()} rows, ${src.channels.length} channels.`,
           },
         });
       } catch (e) {

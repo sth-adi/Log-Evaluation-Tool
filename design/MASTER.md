@@ -10,13 +10,14 @@ Source of truth for look and feel. Tokens live in `frontend/src/styles/tokens.cs
 
 ## Direction
 
-A modern instrument, not an admin panel. The interface is **monochrome on purpose**: near-black surfaces, soft one-pixel lines, rounded controls, generous spacing. The only colour on screen is the data (the trace colours) and one red line, the shared cursor. Nothing decorative: no gradients, no glow, no glass, no repeated card boxes.
+A modern instrument, not an admin panel. Near-black surfaces, soft one-pixel lines, rounded controls, generous spacing, and **UWE FS red as the single accent**. Red marks what is selected or primary (the active view tab, the primary button, the selected log, focus, progress, the cursor line). Everything else is neutral, and the trace colours belong to the data. Nothing decorative: no gradients, no glow, no glass, no repeated card boxes.
 
 The memorable element is **Plot a channel** (press `/` or Ctrl+K): a search palette with recent and suggested channels, group filters and keyboard control. It replaces the old always-open channel lists, so the screen starts nearly empty and fills only with what the engineer asked for.
 
 ## Principles
 
-1. **Show less.** Logs live in a slim left rail as a small timeline. Everything about one log that is not needed all the time (offset, calculated channels, import notes, remove) is behind that log's Manage drawer.
+1. **Show less.** Logs live in a slim left rail as a small timeline. Everything about one log that is not needed all the time (offset, calculated channels, import notes, close) is behind that log's Manage drawer. Closing a log only takes it off the screen.
+   The **Library** holds every processed log. Importing something already there opens the existing log instead of copying it, and an `.LRD` that was converted before is never run through LifeView again.
 2. **Values sit with the data.** Each plot has a header with the channel name, unit and the value at the cursor in large numerals. There is no separate readout column, so plots get the full width.
 3. **One timeline.** A channel is plotted across every log that has it, in session-start order, with dashed boundaries and start times. Calculated channels and event rules apply to all logs at once.
 4. **Honest and offline.** No network at run time. The importer's guesses stay visible in the Manage drawer.
@@ -33,11 +34,11 @@ The memorable element is **Plot a channel** (press `/` or Ctrl+K): a search pale
 | Primary text | Text | `#eceef2` |
 | Secondary text | Muted | `#8b919c` |
 | Quiet text | Faint | `#5d636e` |
-| Shared cursor, errors | Cursor red | `#ff3b47` |
+| Accent: selection, primary action, focus, cursor | UWE FS red | `#e11d2a` (bright `#ff3b47`, soft fill 16%) |
 
 Data colours carry meaning and are never used for chrome: `#ffb020` amber, `#38c8f0` cyan, `#3ddc84` green, `#b79bff` violet, then `#ff8fb1 #e8e8e8 #7fa6ff #d6e34a`. Red is never a data trace.
 
-Selected and primary states are inverted neutral (light fill, dark text), not a brand colour.
+Red is the only accent and is never a data trace. Primary buttons and the active view tab are solid red with white text; chips and tags use the soft red fill with a red outline; the selected log has a red bar. The red is a placeholder until the official livery value is known; change `--red` in `tokens.css`.
 
 ## Type
 

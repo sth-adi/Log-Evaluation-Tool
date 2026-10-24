@@ -10,7 +10,10 @@
   --text: #eceef2;
   --muted: #8b919c;
   --faint: #5d636e;
-  --cursor: #ff3b47; /* the shared cursor, and nothing else */
+  --red: #e11d2a; /* UWE FS red (placeholder: swap for the official livery red) */
+  --red-bright: #ff3b47;
+  --red-soft: rgb(225 29 42 / 0.16);
+  --cursor: #ff3b47;
 
   /* data colours, never used for chrome */
   --ice: #ffb020;

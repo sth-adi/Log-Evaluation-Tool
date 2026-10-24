@@ -10,6 +10,7 @@ for a few seconds per log, so two at once would collide.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import sys
@@ -174,13 +175,26 @@ def _run(job: Job, paths: list[Path], tmp: Path) -> None:
                 continue
             item.state = "working"
             try:
+                lrd_sha = hashlib.sha256(lrd.read_bytes()).hexdigest()
+                have = store.find_existing(lrd_sha=lrd_sha)
+                if have:  # converted before: no need to open LifeView at all
+                    store.update_source(have["id"], open=True)
+                    item.source_id, item.state, item.stage = have["id"], "done", "Already in your library"
+                    continue
                 csv = RUNNER(lrd, lambda s, it=item: setattr(it, "stage", s))
                 item.stage = "Importing"
                 kept = exports / csv.name
                 shutil.copyfile(csv, kept)
                 item.csv = str(kept)
                 parsed = parse_csv(kept.read_bytes(), None, csv.name)
-                rec = store.create_source(parsed.df, parsed.meta, lrd.stem, "other", csv.name)
+                have = store.find_existing(content_sha=parsed.meta["content_sha"])
+                if have:  # the same data was imported from a CSV earlier: remember this LRD too
+                    store.update_source(have["id"], open=True, lrd_sha=lrd_sha)
+                    item.source_id, item.state, item.stage = have["id"], "done", "Already in your library"
+                    continue
+                rec = store.create_source(
+                    parsed.df, parsed.meta, lrd.stem, "other", csv.name, extra={"lrd_sha": lrd_sha}
+                )
                 item.source_id = rec["id"]
                 item.state, item.stage = "done", ""
             except ImportErrorDetail as e:

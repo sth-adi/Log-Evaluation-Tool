@@ -8,6 +8,8 @@ The built frontend (frontend/dist) is served from the same port when present.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -52,6 +54,12 @@ async def import_source(
     except ImportErrorDetail as e:
         raise HTTPException(422, str(e)) from e
     name = file.filename or "upload.csv"
+    if not prof:  # same data already stored: open that one instead of making a copy
+        existing = store.find_existing(content_sha=parsed.meta["content_sha"])
+        if existing:
+            if not existing.get("open", True):
+                existing = store.update_source(existing["id"], open=True)
+            return {**existing, "reused": True}
     return store.create_source(parsed.df, parsed.meta, label or Path(name).stem, kind, name)
 
 
@@ -102,6 +110,38 @@ def convert_cancel(job_id: str) -> dict:
         return lifeview.cancel(job_id).public()
     except KeyError:
         raise HTTPException(404, "unknown conversion") from None
+
+
+@app.get("/api/library")
+def library() -> list[dict]:
+    """All processed logs, open or not: the place to pick logs from without converting again."""
+    return store.library()
+
+
+@app.post("/api/library/folder/open")
+def library_open_folder() -> dict:
+    """Show the folder holding the CSV copies in Explorer."""
+    folder = store.data_dir() / "exports"
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(folder)  # noqa: S606 - a folder we own
+    return {"path": str(folder)}
+
+
+@app.post("/api/library/{source_id}/open")
+def library_open(source_id: str) -> dict:
+    try:
+        return store.update_source(source_id, open=True)
+    except KeyError:
+        raise HTTPException(404, "unknown log") from None
+
+
+@app.post("/api/library/{source_id}/close")
+def library_close(source_id: str) -> dict:
+    try:
+        return store.update_source(source_id, open=False)
+    except KeyError:
+        raise HTTPException(404, "unknown log") from None
 
 
 @app.get("/api/sources")

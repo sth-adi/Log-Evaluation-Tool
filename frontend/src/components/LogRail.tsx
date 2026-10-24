@@ -91,7 +91,7 @@ export function LogDrawer() {
   const setManaging = useStore((s) => s.setManaging);
   const setOffset = useStore((s) => s.setOffset);
   const setKind = useStore((s) => s.setKind);
-  const removeSource = useStore((s) => s.removeSource);
+  const closeLog = useStore((s) => s.closeLog);
   const addDerivedAll = useStore((s) => s.addDerivedAll);
   const removeDerivedAll = useStore((s) => s.removeDerivedAll);
   const src = sources.find((s) => s.id === id);
@@ -239,14 +239,15 @@ export function LogDrawer() {
 
         <footer className="drawer-foot">
           <button
-            className="btn danger"
+            className="btn"
             onClick={() => {
-              void removeSource(src.id);
+              void closeLog(src.id);
               setManaging(null);
             }}
           >
-            Remove this log
+            Close this log
           </button>
+          <p className="hint">It stays in the library, so you can add it back without converting it again.</p>
         </footer>
       </aside>
     </div>

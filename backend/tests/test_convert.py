@@ -15,7 +15,9 @@ def fake_lifeview(monkeypatch, synthetic):
         calls.append(lrd.name)
         progress("Exporting")
         out = lrd.with_name(lrd.stem + " ALL.csv")
-        out.write_text(f"C:/x/{lrd.name}\r\nrange\r\n\r\n" + ecu.to_csv(index=False))
+        shifted = ecu.copy()
+        shifted["RPM"] = shifted["RPM"] + len(calls)  # each log has its own data
+        out.write_text(f"C:/x/{lrd.name}\r\nrange\r\n\r\n" + shifted.to_csv(index=False))
         return out
 
     monkeypatch.setattr(lifeview, "RUNNER", runner)
@@ -37,8 +39,8 @@ def wait_done(client, job_id, timeout=15):
 
 def test_converts_and_imports_in_name_order(client, fake_lifeview):
     files = [
-        ("files", ("2025-11-19 11-49-58 plus 0h00m00s b.LRD", b"lrd-bytes")),
-        ("files", ("2025-11-19 11-42-03 plus 0h00m00s a.LRD", b"lrd-bytes")),
+        ("files", ("2025-11-19 11-49-58 plus 0h00m00s b.LRD", b"lrd-bytes-b")),
+        ("files", ("2025-11-19 11-42-03 plus 0h00m00s a.LRD", b"lrd-bytes-a")),
     ]
     r = client.post("/api/convert", files=files)
     assert r.status_code == 202

@@ -1,4 +1,4 @@
-import type { ConvertJob, ConvertStatus, Source } from "./store";
+import type { ConvertJob, ConvertStatus, LibraryEntry, Source } from "./store";
 
 async function parse<T>(r: Response): Promise<T> {
   if (!r.ok) {
@@ -103,6 +103,11 @@ export const api = {
       `/api/sources/${id}/events`,
       {},
     ),
+
+  library: () => getJson<LibraryEntry[]>("/api/library", {}),
+  libraryOpen: (id: string) => fetch(`/api/library/${id}/open`, { method: "POST" }).then((r) => parse<Source>(r)),
+  libraryClose: (id: string) => fetch(`/api/library/${id}/close`, { method: "POST" }).then((r) => parse<Source>(r)),
+  libraryFolder: () => fetch("/api/library/folder/open", { method: "POST" }).then((r) => parse<{ path: string }>(r)),
 
   convertStatus: () => getJson<ConvertStatus>("/api/convert/status", {}),
 

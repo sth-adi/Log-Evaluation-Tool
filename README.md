@@ -18,6 +18,10 @@ The backend has automated tests. The Windows scripts and the browser UI have not
 
 Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desktop). It starts the tool, waits until it is ready and opens http://127.0.0.1:8000 in your browser. If it is already running it just opens the page. A minimised window stays in the taskbar while the tool runs; close that window to stop it. Binds to 127.0.0.1 only, so nothing is visible on the network.
 
+## The library
+
+Every converted or imported log is kept in the **Library** (top bar). Closing a log in the Manage drawer only takes it off the screen; **Library > Add** brings it back, with no conversion. Logs are recognised by their contents, so importing the same data again (even from another folder, or a new copy of the `.LRD`) opens the existing log and says so, rather than storing a duplicate. **Open folder** shows the CSV copies in Explorer.
+
 ## Getting logs in
 
 - **CSV files** exported from LifeView: choose them with **Import logs**, or drop them on the window.

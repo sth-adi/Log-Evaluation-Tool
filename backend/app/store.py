@@ -45,7 +45,9 @@ def _folder(source_id: str) -> Path:
     return p
 
 
-def create_source(df: pd.DataFrame, meta: dict, label: str, kind: str, filename: str) -> dict:
+def create_source(
+    df: pd.DataFrame, meta: dict, label: str, kind: str, filename: str, extra: dict | None = None
+) -> dict:
     source_id = uuid.uuid4().hex[:10]
     folder = data_dir() / "sources" / source_id
     folder.mkdir(parents=True)
@@ -57,7 +59,9 @@ def create_source(df: pd.DataFrame, meta: dict, label: str, kind: str, filename:
         "filename": filename,
         "imported_at": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
         "offset_s": 0.0,
+        "open": True,  # in the current view; closed logs stay in the library
         **meta,
+        **(extra or {}),
     }
     (folder / "meta.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     return record
@@ -67,12 +71,69 @@ def get_source(source_id: str) -> dict:
     return json.loads((_folder(source_id) / "meta.json").read_text(encoding="utf-8"))
 
 
-def list_sources() -> list[dict]:
+def list_sources(include_closed: bool = False) -> list[dict]:
+    """Logs in the current view (open ones), or every stored log with include_closed."""
     out = []
     for p in sorted((data_dir() / "sources").iterdir()):
         if (p / "meta.json").exists():
             out.append(json.loads((p / "meta.json").read_text(encoding="utf-8")))
+    if not include_closed:
+        out = [r for r in out if r.get("open", True)]
     out.sort(key=lambda r: r["imported_at"])
+    return out
+
+
+_backfilled: set[str] = set()
+
+
+def _backfill_hashes() -> None:
+    """Give logs imported before fingerprints existed one, from the CSV kept in exports."""
+    from .importer import content_sha
+
+    d = str(data_dir())
+    if d in _backfilled:
+        return
+    _backfilled.add(d)
+    for rec in list_sources(include_closed=True):
+        kept = data_dir() / "exports" / rec.get("filename", "")
+        if "content_sha" not in rec and rec.get("filename") and kept.is_file():
+            try:
+                update_source(rec["id"], content_sha=content_sha(kept.read_bytes()))
+            except Exception:  # an unreadable copy just stays without a fingerprint
+                pass
+
+
+def find_existing(content_sha: str | None = None, lrd_sha: str | None = None) -> dict | None:
+    """A stored log (open or closed) with the same data, so nothing is converted or stored twice."""
+    _backfill_hashes()
+    for rec in list_sources(include_closed=True):
+        if (lrd_sha and rec.get("lrd_sha") == lrd_sha) or (content_sha and rec.get("content_sha") == content_sha):
+            return rec
+    return None
+
+
+def library() -> list[dict]:
+    """Every processed log, whether or not it is open, newest session first."""
+    _backfill_hashes()
+    out = []
+    for rec in list_sources(include_closed=True):
+        pq = data_dir() / "sources" / rec["id"] / "data.parquet"
+        out.append(
+            {
+                "id": rec["id"],
+                "label": rec["label"],
+                "filename": rec.get("filename", ""),
+                "started_at": rec.get("started_at"),
+                "imported_at": rec["imported_at"],
+                "duration_s": rec["duration_s"],
+                "rows": rec["rows"],
+                "channels": len(rec["channels"]),
+                "open": rec.get("open", True),
+                "from_lrd": bool(rec.get("lrd_sha")),
+                "size_bytes": pq.stat().st_size if pq.exists() else 0,
+            }
+        )
+    out.sort(key=lambda r: (r["started_at"] or r["imported_at"]), reverse=True)
     return out
 
 

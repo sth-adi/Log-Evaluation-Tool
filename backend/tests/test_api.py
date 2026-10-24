@@ -80,7 +80,7 @@ def test_missing_samples_are_not_zero(client):
 def test_arrange_orders_by_start_time(client):
     def log(stamp):
         head = f"C:/x/{stamp} plus 0h00m00s a.LRD\r\nrange\r\n\r\n".encode()
-        body = "\r\n".join(["Time, v"] + [f"{i / 10:.1f}, {i}" for i in range(50)]).encode()
+        body = "\r\n".join(["Time, v"] + [f"{i / 10:.1f}, {i + int(stamp[11:13])}" for i in range(50)]).encode()
         return head + body
 
     late = client.post("/api/sources", files={"file": ("late.csv", log("2025-11-19 12-00-00"))}).json()
