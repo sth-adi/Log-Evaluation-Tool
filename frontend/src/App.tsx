@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Analysis } from "./components/Analysis";
-import { Lane, TRACE, channelGroups } from "./components/Lane";
-import { Sidebar } from "./components/Sidebar";
+import { Lane, channelGroups } from "./components/Lane";
+import { LogDrawer, LogRail } from "./components/LogRail";
+import { Palette } from "./components/Palette";
 import { extentOf, useStore } from "./store";
+
+const QUICK = ["rpm", "vehicleSpeed", "tps1", "ect1"];
 
 export default function App() {
   const lanes = useStore((s) => s.lanes);
@@ -13,9 +16,11 @@ export default function App() {
   const setMode = useStore((s) => s.setMode);
   const importFiles = useStore((s) => s.importFiles);
   const clearMessage = useStore((s) => s.clearMessage);
+  const setPalette = useStore((s) => s.setPalette);
+  const addChannelAll = useStore((s) => s.addChannelAll);
+  const view = useStore((s) => s.view);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const view = useStore((s) => s.view);
 
   // Open one report per log that has plotted channels, for the zoomed window if there is one.
   const openReports = () => {
@@ -38,6 +43,27 @@ export default function App() {
     void refresh();
   }, [refresh]);
 
+  // "/" or Ctrl+K opens the channel search from anywhere that is not a text box.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      if ((e.key === "k" && (e.ctrlKey || e.metaKey)) || (e.key === "/" && !typing)) {
+        if (!useStore.getState().sources.length) return;
+        e.preventDefault();
+        setPalette(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setPalette]);
+
+  useEffect(() => {
+    if (message?.kind !== "info") return;
+    const t = setTimeout(clearMessage, 5000);
+    return () => clearTimeout(t);
+  }, [message, clearMessage]);
+
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -48,11 +74,13 @@ export default function App() {
     [importFiles],
   );
 
+  const hasLogs = sources.length > 0;
+  const quick = QUICK.filter((n) => sources.some((s) => s.channels.some((c) => c.name === n)));
   let colorOffset = 0;
 
   return (
     <div
-      className={`app${dragging ? " dragging" : ""}`}
+      className={`app${dragging ? " dragging" : ""}${hasLogs ? "" : " bare"}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -62,7 +90,7 @@ export default function App() {
     >
       <header className="topbar">
         <h1>Log Evaluation Tool</h1>
-        {sources.length > 0 && (
+        {hasLogs && (
           <div className="seg" role="tablist" aria-label="View">
             <button role="tab" aria-selected={mode === "plots"} className={mode === "plots" ? "on" : undefined} onClick={() => setMode("plots")}>
               Plots
@@ -72,13 +100,23 @@ export default function App() {
             </button>
           </div>
         )}
-        <span className="muted hint-zoom">Drag on a plot to zoom. Double-click to reset.</span>
+        {hasLogs && (
+          <button className="search" onClick={() => setPalette(true)}>
+            <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden>
+              <circle cx="8" cy="8" r="5.2" />
+              <path d="M12 12l4 4" />
+            </svg>
+            <span>Plot a channel</span>
+            <kbd>/</kbd>
+          </button>
+        )}
+        <div className="spacer" />
         {lanes.length > 0 && (
-          <button onClick={openReports} title="Open a printable report of the plotted channels (zoomed window if zoomed)">
+          <button className="btn" onClick={openReports} title="Open a printable report of the plotted channels">
             Report
           </button>
         )}
-        <button className="primary" onClick={() => fileRef.current?.click()}>
+        <button className="btn" onClick={() => fileRef.current?.click()}>
           Import logs
         </button>
         <input
@@ -95,45 +133,62 @@ export default function App() {
         />
       </header>
 
+      {hasLogs && <LogRail />}
+
+      <main className="stage">
+        {!hasLogs ? (
+          <div className="empty">
+            <h2>Drop your logs here</h2>
+            <p>CSV files exported from LifeView. They stay on this computer.</p>
+            <button className="btn primary lg" onClick={() => fileRef.current?.click()}>
+              Choose files
+            </button>
+          </div>
+        ) : mode === "analysis" ? (
+          <Analysis />
+        ) : lanes.length === 0 ? (
+          <div className="empty">
+            <h2>What do you want to look at?</h2>
+            <p>Plot any channel across all {sources.length === 1 ? "of this log" : `${sources.length} logs`}.</p>
+            {quick.length > 0 && (
+              <div className="quick">
+                {quick.map((n) => (
+                  <button key={n} className="chip lg" onClick={() => addChannelAll(n, false)}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button className="btn lg" onClick={() => setPalette(true)}>
+              Search all channels <kbd>/</kbd>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="lanes">
+              {lanes.map((lane, i) => {
+                const offset = colorOffset;
+                colorOffset += channelGroups(lane.series).length;
+                return <Lane key={lane.id} lane={lane} colorOffset={offset} isLast={i === lanes.length - 1} />;
+              })}
+            </div>
+            <p className="stage-hint">Drag on a plot to zoom. Double-click to see everything again.</p>
+          </>
+        )}
+      </main>
+
+      <Palette />
+      <LogDrawer />
+
       {message && (
-        <div className={`message ${message.kind}`} role={message.kind === "error" ? "alert" : "status"}>
+        <div className={`toast ${message.kind}`} role={message.kind === "error" ? "alert" : "status"}>
           <span>{message.text}</span>
-          <button className="link" onClick={clearMessage}>
+          <button className="btn ghost sm" onClick={clearMessage}>
             Dismiss
           </button>
         </div>
       )}
-
-      <Sidebar />
-
-      <main className="lanes">
-        {mode === "analysis" && sources.length > 0 ? (
-          <Analysis />
-        ) : lanes.length === 0 ? (
-          <div className="empty">
-            {sources.length === 0 ? (
-              <>
-                <h2>Import an ECU or HCU log</h2>
-                <p>Choose CSV files, or drop them anywhere in this window. Nothing leaves this computer.</p>
-                <button className="primary" onClick={() => fileRef.current?.click()}>
-                  Import logs
-                </button>
-              </>
-            ) : (
-              <>
-                <h2>Pick a channel to plot</h2>
-                <p>Select a channel in the list on the left.</p>
-              </>
-            )}
-          </div>
-        ) : (
-          lanes.map((lane, i) => {
-            const offset = colorOffset;
-            colorOffset += channelGroups(lane.series).length;
-            return <Lane key={lane.id} lane={lane} colorOffset={offset % TRACE.length} isLast={i === lanes.length - 1} />;
-          })
-        )}
-      </main>
+      {dragging && <div className="drop-veil">Drop to import</div>}
     </div>
   );
 }

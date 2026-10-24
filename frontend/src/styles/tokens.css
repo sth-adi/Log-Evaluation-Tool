@@ -1,30 +1,37 @@
-/* Design tokens. Source of truth: design/MASTER.md */
+/* Design tokens. Source of truth: design/MASTER.md
+   The interface is monochrome on purpose: the only colour on screen is the data. */
 :root {
-  --black: #000000;
-  --graphite: #171717;
-  --steel: #242424;
-  --rule: #333333;
-  --chalk: #f2f2f2;
-  --ash: #9a9a9a;
-  --red: #e11d2a; /* placeholder: swap for the official UWE FS red */
+  --ink: #0a0b0d; /* plot canvas */
+  --panel: #111317; /* chrome */
+  --raised: #181b21; /* controls, popovers */
+  --hover: #1f232a;
+  --line: #23272e; /* hairlines */
+  --line-strong: #343944;
+  --text: #eceef2;
+  --muted: #8b919c;
+  --faint: #5d636e;
+  --cursor: #ff3b47; /* the shared cursor, and nothing else */
 
+  /* data colours, never used for chrome */
   --ice: #ffb020;
   --motor: #38c8f0;
   --regen: #3ddc84;
   --pack: #b79bff;
 
-  --font: "Barlow Semi Condensed", system-ui, sans-serif;
-  --font-title: "Barlow Condensed", "Barlow Semi Condensed", system-ui, sans-serif;
+  --font: "Geist Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 
-  --t11: 11px;
   --t12: 12px;
   --t13: 13px;
-  --t15: 15px;
-  --t18: 18px;
-  --t28: 28px;
+  --t14: 14px;
+  --t16: 16px;
+  --t22: 22px;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
 
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --dur: 120ms;
+  --dur: 140ms;
 }
 
 @media (prefers-reduced-motion: reduce) {

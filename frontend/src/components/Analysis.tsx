@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import { api } from "../api";
 import { extentOf, useStore, type LaneSeries } from "../store";
-import { TRACE, formatValue } from "./Lane";
+import { TRACE, channelGroups, formatValue } from "./Lane";
 
 type Kind = "stats" | "histogram" | "spectrum" | "scatter" | "events";
 const KINDS: { id: Kind; label: string }[] = [
@@ -13,9 +13,9 @@ const KINDS: { id: Kind; label: string }[] = [
   { id: "events", label: "Events" },
 ];
 
-const ASH = "#9a9a9a";
-const RULE = "#333333";
-const FONT = '12px "Barlow Semi Condensed", system-ui, sans-serif';
+const ASH = "#8b919c";
+const RULE = "#1d2127";
+const FONT = '12px "Geist Variable", system-ui, sans-serif';
 
 const keyOf = (s: LaneSeries) => `${s.sourceId}|${s.channel}`;
 const fromKey = (k: string): LaneSeries => {
@@ -159,15 +159,19 @@ function StatsTable({ series, t0, t1, rev }: { series: LaneSeries[]; t0?: number
         </tr>
       </thead>
       <tbody>
-        {series.map((s, i) => {
+        {series.map((s) => {
           const r = data[keyOf(s)] as unknown as Record<string, number> | undefined;
-          const unit = sources.find((x) => x.id === s.sourceId)?.channels.find((c) => c.name === s.channel)?.unit;
+          const src = sources.find((x) => x.id === s.sourceId);
+          const unit = src?.channels.find((c) => c.name === s.channel)?.unit;
+          const logTag = sources.length > 1 && src ? (src.started_at ? src.started_at.slice(11, 19) : src.label) : "";
+          const colour = TRACE[channelGroups(series).indexOf(s.channel) % TRACE.length];
           return (
             <tr key={keyOf(s)}>
               <th scope="row">
-                <span className="swatch" style={{ background: TRACE[i % TRACE.length] }} aria-hidden />
+                <span className="swatch" style={{ background: colour }} aria-hidden />
                 {s.channel}
                 {unit && <small> {unit}</small>}
+                {logTag && <small className="log-tag">{logTag}</small>}
               </th>
               {cols.map(([h, k]) => (
                 <td key={h} className="num">{r?.count ? formatValue(r[k]) : "–"}</td>
@@ -303,10 +307,13 @@ function EventsPanel() {
   const refresh = useStore((s) => s.refresh);
   const setView = useStore((s) => s.setView);
   const setMode = useStore((s) => s.setMode);
-  const [srcId, setSrcId] = useState("");
-  const id = srcId || sources[0]?.id || "";
-  const src = sources.find((s) => s.id === id);
-  const rules = src?.rules ?? [];
+
+  // A rule applies to every log, so list each rule once.
+  const rules = useMemo(() => {
+    const m = new Map<string, { name: string; expr: string; min_duration_s: number }>();
+    for (const src of sources) for (const r of src.rules ?? []) if (!m.has(r.name)) m.set(r.name, r);
+    return [...m.values()];
+  }, [sources]);
 
   const [name, setName] = useState("");
   const [expr, setExpr] = useState("");
@@ -314,21 +321,35 @@ function EventsPanel() {
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
-  const { data: events, error } = useFetched(() => (id ? api.events(id) : Promise.resolve([])), [id, rules.map((r) => r.name + r.expr).join("|"), tick, src?.offset_s]);
+  const sig = sources.map((s) => `${s.id}:${s.offset_s}:${(s.rules ?? []).map((r) => r.name + r.expr).join("|")}`).join(";");
+  const { data: events, error } = useFetched(async () => {
+    const all = await Promise.all(sources.map((src) => api.events(src.id).then((es) => es.map((e) => ({ ...e, src })))));
+    return all.flat().sort((x, y) => x.t_start - y.t_start);
+  }, [sig, tick]);
 
   const add = async () => {
     setErr(null);
-    try {
-      await api.addRule(id, { name: name.trim(), expr, min_duration_s: parseFloat(minDur) || 0, merge_gap_s: 0 });
+    let done = 0;
+    let first = "";
+    for (const src of sources) {
+      try {
+        await api.addRule(src.id, { name: name.trim(), expr, min_duration_s: parseFloat(minDur) || 0, merge_gap_s: 0 });
+        done += 1;
+      } catch (e) {
+        if (!first) first = (e as Error).message;
+      }
+    }
+    if (done === 0) setErr(first);
+    else {
       setName("");
       setExpr("");
-      await refresh();
-    } catch (e) {
-      setErr((e as Error).message);
+      if (first) setErr(`Added to ${done} of ${sources.length} logs. ${first}`);
     }
+    await refresh();
+    setTick((x) => x + 1);
   };
   const remove = async (n: string) => {
-    await api.removeRule(id, n);
+    for (const src of sources) if ((src.rules ?? []).some((r) => r.name === n)) await api.removeRule(src.id, n);
     await refresh();
     setTick((x) => x + 1);
   };
@@ -337,20 +358,11 @@ function EventsPanel() {
     setView([a - pad, b + pad]);
     setMode("plots");
   };
+  const clock = (s: { started_at: string | null; label: string }) => (s.started_at ? s.started_at.slice(11, 19) : s.label);
 
   return (
     <div className="events">
       <div className="rule-form">
-        {sources.length > 1 && (
-          <label className="inline">
-            Log
-            <select value={id} onChange={(e) => setSrcId(e.target.value)}>
-              {sources.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-          </label>
-        )}
         <label className="inline">
           Rule name
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Coolant hot" />
@@ -369,15 +381,18 @@ function EventsPanel() {
           For at least (s)
           <input type="number" min="0" step="0.1" value={minDur} onChange={(e) => setMinDur(e.target.value)} />
         </label>
-        <button className="primary" disabled={!name.trim() || !expr.trim() || !id} onClick={() => void add()}>
-          Add rule
+        <button className="btn primary" disabled={!name.trim() || !expr.trim() || !sources.length} onClick={() => void add()}>
+          {sources.length > 1 ? `Add to all ${sources.length} logs` : "Add rule"}
         </button>
       </div>
-      {err && <p className="rule-error" role="alert">{err}</p>}
+      {err && (
+        <p className="rule-error" role="alert">
+          {err}
+        </p>
+      )}
       <p className="muted small pad">
-        A condition is a formula that is true or false at each sample, using channel names and math channels, for
-        example <code>rpm &gt; 11500</code>, <code>vehicleSpeed &lt; 1 and rpm &gt; 4000</code>. An event is a stretch where it
-        stays true.
+        A condition is true or false at each sample, for example <code>rpm &gt; 11500</code> or{" "}
+        <code>vehicleSpeed &lt; 1 and rpm &gt; 4000</code>. An event is a stretch where it stays true.
       </p>
 
       {rules.length > 0 && (
@@ -395,7 +410,9 @@ function EventsPanel() {
       )}
 
       {error ? (
-        <p className="rule-error" role="alert">{error}</p>
+        <p className="rule-error" role="alert">
+          {error}
+        </p>
       ) : rules.length === 0 ? null : !events ? (
         <p className="muted pad">Loading</p>
       ) : events.length === 0 ? (
@@ -405,6 +422,7 @@ function EventsPanel() {
           <thead>
             <tr>
               <th scope="col">Rule</th>
+              {sources.length > 1 && <th scope="col">Log</th>}
               <th scope="col" className="num">Start (s)</th>
               <th scope="col" className="num">End (s)</th>
               <th scope="col" className="num">Length (s)</th>
@@ -415,6 +433,7 @@ function EventsPanel() {
             {events.map((e, i) => (
               <tr key={i}>
                 <th scope="row">{e.rule}</th>
+                {sources.length > 1 && <td>{clock(e.src)}</td>}
                 <td className="num">{formatValue(e.t_start)}</td>
                 <td className="num">{formatValue(e.t_end)}</td>
                 <td className="num">{formatValue(e.duration_s)}</td>

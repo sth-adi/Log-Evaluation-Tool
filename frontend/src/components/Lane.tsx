@@ -5,9 +5,9 @@ import { extentOf, useStore, type Lane as LaneModel } from "../store";
 
 export const TRACE = ["#ffb020", "#38c8f0", "#3ddc84", "#b79bff", "#ff8fb1", "#e8e8e8", "#7fa6ff", "#d6e34a"];
 
-const ASH = "#9a9a9a";
-const RULE = "#333333";
-const FONT = '12px "Barlow Semi Condensed", system-ui, sans-serif';
+const ASH = "#8b919c";
+const RULE = "#1d2127";
+const FONT = '12px "Geist Variable", system-ui, sans-serif';
 const SYNC = { key: "let", setSeries: false, scales: ["x", null] as [string, null] };
 
 /** Channels in a lane, once each: the same channel from several logs is one trace group. */
@@ -86,7 +86,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       cursor: {
         sync: SYNC,
         drag: { x: true, y: false, uni: 30 },
-        points: { size: 7, width: 1 },
+        points: { show: false },
         bind: {
           dblclick: (u) => () => {
             const [a, b] = extentOf(useStore.getState().sources);
@@ -271,6 +271,16 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rulesKey, rev, seriesKey]);
 
+  // Follow the zoom window when it is changed from outside the plot (a log in the rail, an event).
+  useEffect(() => {
+    const u = plotRef.current;
+    if (!u || !view) return;
+    const { min, max } = u.scales.x;
+    if (min == null || max == null || Math.abs(min - view[0]) > 1e-6 || Math.abs(max - view[1]) > 1e-6) {
+      u.setScale("x", { min: view[0], max: view[1] });
+    }
+  }, [view]);
+
   // Keep the plot size in step with its container.
   useEffect(() => {
     const u = plotRef.current;
@@ -335,33 +345,35 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const solo = groups.length === 1;
 
   return (
-    <section className="lane" aria-label={`Plot: ${title}`}>
+    <section className={`lane${solo ? " solo" : ""}`} aria-label={`Plot: ${title}`}>
+      <header className="lane-head">
+        <div className="lane-series">
+          {groups.map((ch, i) => {
+            const logs = lane.series.filter((s) => s.channel === ch).length;
+            const m = gmeta[i];
+            return (
+              <div className="lane-chip" key={ch}>
+                <span className="dot" style={{ background: TRACE[(colorOffset + i) % TRACE.length] }} aria-hidden />
+                <span className="chip-name">{ch}</span>
+                <span className="chip-unit">
+                  {m.states ? "" : m.unit}
+                  {logs > 1 ? `${m.unit && !m.states ? ", " : ""}${logs} logs` : ""}
+                </span>
+                <span className="chip-val">{stateLabel(m.states, readout.v[i]) ?? formatValue(readout.v[i])}</span>
+              </div>
+            );
+          })}
+        </div>
+        <span className="lane-time">{readout.t == null ? "" : `${readout.t.toFixed(2)} s`}</span>
+        <button className="icon-btn" onClick={() => removeLane(lane.id)} aria-label={`Remove plot ${title}`} title="Remove plot">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+            <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+          </svg>
+        </button>
+      </header>
       <div className="lane-plot">
-        <h2 className="lane-title">{title}</h2>
         <div ref={boxRef} className="lane-canvas" />
       </div>
-      <aside className="readout" aria-label={`Values at cursor for ${title}`}>
-        <div className="ro-time">{readout.t == null ? "Cursor off" : `t ${readout.t.toFixed(2)} s`}</div>
-        {groups.map((ch, i) => {
-          const logs = lane.series.filter((s) => s.channel === ch).length;
-          return (
-            <div className="ro-row" key={ch}>
-              <span className="swatch" style={{ background: TRACE[(colorOffset + i) % TRACE.length] }} aria-hidden />
-              <span className="ro-name">
-                {ch}
-                <small>{logs > 1 ? `${logs} logs` : gmeta[i].source}</small>
-              </span>
-              <span className={solo ? "ro-val big" : "ro-val"}>
-                {stateLabel(gmeta[i].states, readout.v[i]) ?? formatValue(readout.v[i])}
-                <small>{gmeta[i].states ? "" : gmeta[i].unit}</small>
-              </span>
-            </div>
-          );
-        })}
-        <button className="lane-remove" onClick={() => removeLane(lane.id)}>
-          Remove plot
-        </button>
-      </aside>
     </section>
   );
 }

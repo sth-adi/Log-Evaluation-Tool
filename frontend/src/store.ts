@@ -36,6 +36,13 @@ export type Lane = { id: number; series: LaneSeries[] };
 type State = {
   sources: Source[];
   lanes: Lane[];
+  paletteOpen: boolean;
+  setPalette: (open: boolean) => void;
+  managing: string | null; // id of the log whose drawer is open
+  setManaging: (id: string | null) => void;
+  recent: string[]; // channels plotted lately, newest first
+  addDerivedAll: (name: string, expr: string, unit: string) => Promise<boolean>;
+  removeDerivedAll: (name: string) => Promise<void>;
   mode: "plots" | "analysis";
   setMode: (m: "plots" | "analysis") => void;
   view: [number, number] | null; // null = full extent
@@ -58,6 +65,23 @@ type State = {
 
 let laneId = 1;
 
+const RECENT_KEY = "let.recent";
+function loadRecent(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 6) : [];
+  } catch {
+    return [];
+  }
+}
+function saveRecent(r: string[]) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(r));
+  } catch {
+    /* private window or blocked storage: the list just will not persist */
+  }
+}
+
 const guessKind = (name: string): Source["kind"] =>
   /hcu/i.test(name) ? "hcu" : /ecu|f88/i.test(name) ? "ecu" : "other";
 
@@ -67,6 +91,54 @@ export const useStore = create<State>((set, get) => ({
   view: null,
   mode: "plots",
   setMode: (mode) => set({ mode }),
+  paletteOpen: false,
+  setPalette: (paletteOpen) => set({ paletteOpen }),
+  managing: null,
+  setManaging: (managing) => set({ managing }),
+  recent: loadRecent(),
+
+  addDerivedAll: async (name, expr, unit) => {
+    const srcs = get().sources;
+    let done = 0;
+    let firstErr = "";
+    for (const s of srcs) {
+      try {
+        await api.addDerived(s.id, { name, expr, unit });
+        done += 1;
+      } catch (e) {
+        if (!firstErr) firstErr = (e as Error).message;
+      }
+    }
+    await get().refresh();
+    if (done === 0) {
+      set({ message: { kind: "error", text: `Calculated channel not added. ${firstErr}` } });
+      return false;
+    }
+    set({
+      message: {
+        kind: "info",
+        text: done === srcs.length ? `Added ${name}.` : `Added ${name} to ${done} of ${srcs.length} logs. ${firstErr}`,
+      },
+    });
+    return true;
+  },
+
+  removeDerivedAll: async (name) => {
+    for (const s of get().sources) {
+      if (!s.channels.some((c) => c.name === name && c.derived)) continue;
+      try {
+        await api.removeDerived(s.id, name);
+      } catch (e) {
+        set({ message: { kind: "error", text: (e as Error).message } });
+      }
+    }
+    set((st) => ({
+      lanes: st.lanes
+        .map((l) => ({ ...l, series: l.series.filter((x) => x.channel !== name) }))
+        .filter((l) => l.series.length > 0),
+    }));
+    await get().refresh();
+  },
   rev: 0,
   message: null,
 
@@ -182,12 +254,14 @@ export const useStore = create<State>((set, get) => ({
         .sort((a, b) => a.offset_s - b.offset_s)
         .map((src) => ({ sourceId: src.id, channel }));
       if (!list.length) return s;
+      const recent = [channel, ...s.recent.filter((x) => x !== channel)].slice(0, 6);
+      saveRecent(recent);
       const last = s.lanes[s.lanes.length - 1];
       if (overlay && last) {
         const fresh = list.filter((n) => !last.series.some((x) => x.sourceId === n.sourceId && x.channel === n.channel));
-        return { lanes: [...s.lanes.slice(0, -1), { ...last, series: [...last.series, ...fresh] }] };
+        return { recent, lanes: [...s.lanes.slice(0, -1), { ...last, series: [...last.series, ...fresh] }] };
       }
-      return { lanes: [...s.lanes, { id: laneId++, series: list }] };
+      return { recent, lanes: [...s.lanes, { id: laneId++, series: list }] };
     }),
 
   removeLane: (id) => set((s) => ({ lanes: s.lanes.filter((l) => l.id !== id) })),
