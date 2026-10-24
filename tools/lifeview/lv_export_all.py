@@ -69,7 +69,8 @@ def main():
         if '--takeover' not in sys.argv:
             sys.exit('LifeView is already open. Close it, or pass --takeover to let this script close it.')
         close_lifeview()
-    logs = sorted(glob.glob(os.path.join(folder, '*.LRD')) + glob.glob(os.path.join(folder, '*.lrd')))
+    # Windows paths are case-insensitive, so '*.LRD' and '*.lrd' both match every file: de-duplicate
+    logs = sorted({os.path.normcase(p): p for p in glob.glob(os.path.join(folder, '*.[Ll][Rr][Dd]'))}.values())
     todo = [p for p in logs if force or not os.path.exists(os.path.splitext(p)[0] + ' ALL.csv')]
     print(f'{len(logs)} log(s), {len(todo)} to export. Hands off the mouse and keyboard.')
     failed = []
