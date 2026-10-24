@@ -149,3 +149,16 @@ def test_event_rules(client, synthetic):
     assert client.post(f"/api/sources/{sid}/rules", json={"name": "x", "expr": "nope > 1"}).status_code == 422
     assert client.delete(f"/api/sources/{sid}/rules/High rpm").status_code == 200
     assert client.get(f"/api/sources/{sid}/events").json() == []
+
+
+def test_report_is_self_contained_html(client, synthetic):
+    ecu, _ = synthetic
+    sid = client.post("/api/sources", files={"file": ("ecu.csv", ecu.to_csv(index=False).encode())}).json()["id"]
+    client.post(f"/api/sources/{sid}/rules", json={"name": "Wide open", "expr": "TPS > 50"})
+    r = client.get(f"/api/sources/{sid}/report", params={"channels": "RPM,TPS"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    html = r.text
+    assert html.count("<svg") == 2 and "Wide open" in html and "RPM" in html
+    assert "<script" not in html and "http://" not in html.replace("http://www.w3.org/2000/svg", "")
+    assert client.get(f"/api/sources/{sid}/report", params={"channels": ""}).status_code == 422
+    assert client.get(f"/api/sources/{sid}/report", params={"channels": "nope"}).status_code == 422

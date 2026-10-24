@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, store
+from . import analysis, report, store
+from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
 
@@ -182,6 +183,32 @@ def events(source_id: str) -> list[dict]:
         raise HTTPException(404, "unknown source") from None
     except FormulaError as e:
         raise HTTPException(422, str(e)) from e
+
+
+@app.get("/api/sources/{source_id}/report", response_class=HTMLResponse)
+def report_page(
+    source_id: str, channels: str = Query(...), t0: float | None = None, t1: float | None = None
+) -> HTMLResponse:
+    """A single self-contained HTML report (plots, statistics, events) for the chosen channels."""
+    names = [c for c in channels.split(",") if c][:12]
+    if not names:
+        raise HTTPException(422, "Choose at least one channel")
+    t, arr = _window(source_id, names, t0, t1)
+    rec = store.get_source(source_id)
+    x0, x1 = (t0 if t0 is not None else float(t[0])), (t1 if t1 is not None else float(t[-1]))
+    if x1 <= x0:
+        raise HTTPException(422, "Empty time window")
+    try:
+        events = [e for e in store.list_events(source_id) if e["t_end"] >= x0 and e["t_start"] <= x1]
+    except FormulaError:
+        events = []
+    plots = []
+    for c in names:
+        tt, yy, _ = minmax_downsample(t, arr[c], x0, x1, 900)
+        unit = next((k["unit"] for k in rec["channels"] if k["name"] == c), "")
+        plots.append([(c, unit, tt, yy)])
+    stats = {c: analysis.stats(arr[c], t) for c in names}
+    return HTMLResponse(report.render(rec, stats, plots, events, x0, x1))
 
 
 def _window(source_id: str, channels: list[str], t0, t1):

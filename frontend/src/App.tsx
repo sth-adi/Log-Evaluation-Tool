@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Analysis } from "./components/Analysis";
 import { Lane, TRACE } from "./components/Lane";
 import { Sidebar } from "./components/Sidebar";
-import { useStore } from "./store";
+import { extentOf, useStore } from "./store";
 
 export default function App() {
   const lanes = useStore((s) => s.lanes);
@@ -15,6 +15,24 @@ export default function App() {
   const clearMessage = useStore((s) => s.clearMessage);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const view = useStore((s) => s.view);
+
+  // Open one report per log that has plotted channels, for the zoomed window if there is one.
+  const openReports = () => {
+    const [e0, e1] = extentOf(sources);
+    const zoomed = view != null && (Math.abs(view[0] - e0) > 1e-6 || Math.abs(view[1] - e1) > 1e-6);
+    const bySource = new Map<string, string[]>();
+    for (const l of lanes)
+      for (const s of l.series) bySource.set(s.sourceId, [...new Set([...(bySource.get(s.sourceId) ?? []), s.channel])]);
+    for (const [id, chans] of bySource) {
+      const q = new URLSearchParams({ channels: chans.join(",") });
+      if (zoomed && view) {
+        q.set("t0", String(view[0]));
+        q.set("t1", String(view[1]));
+      }
+      window.open(`/api/sources/${id}/report?${q}`, "_blank", "noopener");
+    }
+  };
 
   useEffect(() => {
     void refresh();
@@ -55,6 +73,11 @@ export default function App() {
           </div>
         )}
         <span className="muted hint-zoom">Drag on a plot to zoom. Double-click to reset.</span>
+        {lanes.length > 0 && (
+          <button onClick={openReports} title="Open a printable report of the plotted channels (zoomed window if zoomed)">
+            Report
+          </button>
+        )}
         <button className="primary" onClick={() => fileRef.current?.click()}>
           Import logs
         </button>
