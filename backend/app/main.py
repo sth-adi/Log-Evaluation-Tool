@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, laps, lifeview, report, store, workspaces
+from . import analysis, laps, lifeview, live, report, store, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
@@ -31,6 +31,7 @@ MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 KINDS = {"ecu", "hcu", "other"}
 
 app = FastAPI(title="Log Evaluation Tool", version="0.1.0")
+app.include_router(live.router)
 
 
 @app.get("/api/health")

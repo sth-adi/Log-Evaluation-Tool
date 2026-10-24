@@ -104,8 +104,8 @@ type State = {
   openView: (v: SavedView) => void;
   deleteView: (id: string) => Promise<void>;
   importViewFile: (file: File) => Promise<void>;
-  mode: "plots" | "analysis" | "laps";
-  setMode: (m: "plots" | "analysis" | "laps") => void;
+  mode: "plots" | "analysis" | "laps" | "live";
+  setMode: (m: "plots" | "analysis" | "laps" | "live") => void;
   view: [number, number] | null; // null = full extent
   rev: number; // bumped when data on the server changes (offset edits)
   message: { kind: "error" | "info"; text: string } | null;
@@ -184,7 +184,7 @@ export const useStore = create<State>((set, get) => ({
     const s = get();
     const payload: ViewPayload = {
       v: 1,
-      mode: s.mode,
+      mode: s.mode === "live" ? "plots" : s.mode, // a live screen is not something to come back to
       lanes: s.lanes.map((l) => [...new Set(l.series.map((x) => x.channel))]),
       lap: { params: s.lapParams, axis: s.lapAxis },
     };

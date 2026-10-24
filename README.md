@@ -57,6 +57,26 @@ Dyno and bench logs have no start/finish line, so the tab says so instead of gue
 - **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
 - **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 
+## Live telemetry
+
+The **Live** tab follows data as it arrives: a value and a rolling plot for each channel you pick, over the last 10 to 120 seconds. **Save as log** keeps what the tool holds as an ordinary log, so lap analysis, reports and downloads work on a recorded session.
+
+Choose where the data comes from:
+
+| Source | What it is |
+| --- | --- |
+| Simulated car | A made-up car lapping a circuit. Try everything with no hardware. |
+| Replay a saved log | Plays a log from the library back in real time, at 1x to 10x. |
+| UDP port | Lines of data sent to this computer over the network. |
+| Serial / USB port | The same lines read from a COM port (uses pyserial, which is included). |
+| Pushed by another program | A bridge posts rows to `POST /api/live/ingest`. See `tools/live_bridge_example.py`. |
+
+A line is JSON, `{"t": 12.34, "rpm": 8200, "vehicleSpeed": 71.5}` (`t` in seconds, optional), or CSV whose first non-numeric line names the columns. Channels can appear at any time.
+
+The tool keeps the latest 200,000 rows in memory (about 33 minutes at 100 rows a second; set `LET_LIVE_ROWS` to change it). Longer sessions lose their start, and the saved log says so.
+
+How the car's data reaches the laptop is the one part that depends on your hardware. Write that as a small bridge that posts rows (the example shows how), and the rest of the screen needs no changes.
+
 ## Run it on Windows
 
 Needs Python 3.10+ and, for the first build, Node.js 20+.

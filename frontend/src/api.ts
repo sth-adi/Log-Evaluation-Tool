@@ -68,6 +68,21 @@ export type LapCompare = {
   skipped: { id: string; reason: string }[];
   laps: { log: string; n: number; duration_s: number; channels: Record<string, (number | null)[]>; delta_s?: (number | null)[] }[];
 };
+export type LiveChannel = { name: string; unit: string; last: number | null };
+export type LiveStatus = {
+  state: "running" | "stopped";
+  source: { kind: string; label: string; options: Record<string, unknown> } | null;
+  error: string | null;
+  rows: number;
+  kept: number;
+  capacity: number;
+  rate_hz: number | null;
+  age_s: number | null;
+  time_s: number | null;
+  channels: LiveChannel[];
+};
+export type LiveSourceKind = "simulator" | "replay" | "udp" | "serial" | "push";
+
 export type LapStats = {
   sectors: number;
   ideal_s: number | null;
@@ -106,6 +121,29 @@ const lapQuery = (p: LapParams) => ({
 });
 
 export const api = {
+  liveStatus: () => getJson<LiveStatus>("/api/live/status", {}),
+  livePorts: () => getJson<{ port: string; description: string }[]>("/api/live/ports", {}),
+  liveStart: (source: LiveSourceKind, options: Record<string, unknown>) =>
+    fetch("/api/live/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, options }),
+    }).then((r) => parse<LiveStatus>(r)),
+  liveStop: () => fetch("/api/live/stop", { method: "POST" }).then((r) => parse<LiveStatus>(r)),
+  liveClear: () => fetch("/api/live/clear", { method: "POST" }).then((r) => parse<LiveStatus>(r)),
+  liveSave: (label: string) =>
+    fetch("/api/live/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    }).then((r) => parse<Source>(r)),
+  liveWindow: (channels: string[], seconds: number) =>
+    getJson<{ t: number[]; v: Record<string, (number | null)[]> }>("/api/live/window", {
+      channels: channels.join(","),
+      seconds,
+      points: 1500,
+    }),
+
   views: () => getJson<SavedView[]>("/api/workspaces", {}),
   saveView: (name: string, payload: ViewPayload) =>
     fetch("/api/workspaces", {

@@ -1534,3 +1534,119 @@ a.btn,
 a.btn:visited {
   color: var(--text);
 }
+
+/* ---- live ------------------------------------------------------------------ */
+
+.live {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.live-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.live-bar label.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.live-bar input[type="number"] {
+  width: 90px;
+}
+.live-bar .save-name {
+  width: 200px;
+}
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t13);
+}
+.live-status .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+.live-status .dot.on {
+  background: #3ddc84;
+}
+.live-status .dot.warn {
+  background: #ffb020;
+}
+.live-error {
+  color: var(--red-bright);
+}
+.live-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+.live-main {
+  min-width: 0;
+}
+.live-plots {
+  display: flex;
+  flex-direction: column;
+}
+.live-plot {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 16px 10px;
+}
+.live-plot-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.live-plot-head small {
+  color: var(--muted);
+}
+.live-plot-head .swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  align-self: center;
+}
+.live-value {
+  margin-left: auto;
+  font-size: var(--t22);
+  font-weight: 600;
+}
+.live-canvas {
+  width: 100%;
+  height: 150px;
+}
+.live-connect {
+  max-width: 64ch;
+  padding: 32px 24px;
+}
+.live-connect h2 {
+  margin: 0 0 8px;
+}
+.live-connect details {
+  margin-top: 14px;
+}
+.live-connect summary {
+  cursor: pointer;
+}
+pre.code {
+  margin: 8px 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--t12);
+  white-space: pre;
+}

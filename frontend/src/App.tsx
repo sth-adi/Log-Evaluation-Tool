@@ -3,6 +3,7 @@ import { Analysis } from "./components/Analysis";
 import { ConvertDialog } from "./components/ConvertDialog";
 import { Lane, channelGroups } from "./components/Lane";
 import { Laps } from "./components/Laps";
+import { Live } from "./components/Live";
 import { Library } from "./components/Library";
 import { Views } from "./components/Views";
 import { LogDrawer, LogRail } from "./components/LogRail";
@@ -89,7 +90,7 @@ export default function App() {
 
   return (
     <div
-      className={`app${dragging ? " dragging" : ""}${hasLogs ? "" : " bare"}`}
+      className={`app${dragging ? " dragging" : ""}${hasLogs && mode !== "live" ? "" : " bare"}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -99,8 +100,9 @@ export default function App() {
     >
       <header className="topbar">
         <h1>Log Evaluation Tool</h1>
-        {hasLogs && (
-          <div className="seg" role="tablist" aria-label="View">
+        <div className="seg" role="tablist" aria-label="View">
+          {hasLogs && (
+            <>
             <button role="tab" aria-selected={mode === "plots"} className={mode === "plots" ? "on" : undefined} onClick={() => setMode("plots")}>
               Plots
             </button>
@@ -110,9 +112,13 @@ export default function App() {
             <button role="tab" aria-selected={mode === "laps"} className={mode === "laps" ? "on" : undefined} onClick={() => setMode("laps")}>
               Laps
             </button>
-          </div>
-        )}
-        {hasLogs && (
+            </>
+          )}
+          <button role="tab" aria-selected={mode === "live"} className={mode === "live" ? "on" : undefined} onClick={() => setMode("live")}>
+            Live
+          </button>
+        </div>
+        {hasLogs && mode !== "live" && (
           <button className="search" onClick={() => setPalette(true)}>
             <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden>
               <circle cx="8" cy="8" r="5.2" />
@@ -153,15 +159,20 @@ export default function App() {
         />
       </header>
 
-      {hasLogs && <LogRail />}
+      {hasLogs && mode !== "live" && <LogRail />}
 
       <main className="stage">
-        {!hasLogs ? (
+        {mode === "live" ? (
+          <Live />
+        ) : !hasLogs ? (
           <div className="empty">
             <h2>Drop your logs here</h2>
             <p>Life Racing .LRD logs, or CSV files exported from LifeView. Everything stays on this computer.</p>
             <button className="btn primary lg" onClick={() => fileRef.current?.click()}>
               Choose files
+            </button>
+            <button className="btn lg" onClick={() => setMode("live")}>
+              Go live
             </button>
             {library.length > 0 && (
               <button className="btn lg" onClick={() => setLibraryOpen(true)}>
