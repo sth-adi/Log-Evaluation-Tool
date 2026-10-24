@@ -21,7 +21,7 @@ import win32con
 import win32gui
 import win32process
 
-TMP_NAME = 'lvtmp'
+TMP_NAME = 'x'   # any non-empty name works: the new file is renamed afterwards
 u = ctypes.windll.user32
 u.SetProcessDPIAware()
 DIALOG = 'ATL:006F2048'
@@ -50,7 +50,7 @@ def wait_new(before, cls, timeout=8):
         for h in tops():
             if h not in before and win32gui.GetClassName(h) == cls:
                 return h
-        time.sleep(0.2)
+        time.sleep(0.04)
     raise RuntimeError('timed out waiting for new ' + cls)
 
 
@@ -58,7 +58,7 @@ def msg_click(h, x=10, y=8):
     lp = win32api.MAKELONG(x, y)
     win32gui.PostMessage(h, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lp)
     win32gui.PostMessage(h, win32con.WM_LBUTTONUP, 0, lp)
-    time.sleep(0.6)
+    time.sleep(0.1)
 
 
 def front(h):
@@ -70,7 +70,7 @@ def front(h):
     u.BringWindowToTop(h)
     u.SetForegroundWindow(h)
     u.AttachThreadInput(fg, tid, False)
-    time.sleep(0.5)
+    time.sleep(0.15)
     if u.GetForegroundWindow() != h:
         raise RuntimeError('could not foreground the filename dialog; not typing')
 
@@ -78,19 +78,19 @@ def front(h):
 def real_click(h):
     l, t, r, b = win32gui.GetWindowRect(h)
     u.SetCursorPos((l + r) // 2, (t + b) // 2)
-    time.sleep(0.3)
+    time.sleep(0.1)
     u.mouse_event(2, 0, 0, 0, 0)
-    time.sleep(0.08)
+    time.sleep(0.04)
     u.mouse_event(4, 0, 0, 0, 0)
-    time.sleep(0.3)
+    time.sleep(0.1)
 
 
 def tap(vk):
     sc = u.MapVirtualKeyW(vk, 0)
     u.keybd_event(vk, sc, 0, 0)
-    time.sleep(0.12)
+    time.sleep(0.05)
     u.keybd_event(vk, sc, 2, 0)
-    time.sleep(0.12)
+    time.sleep(0.05)
 
 
 VK_SHIFT = 0x10
@@ -118,6 +118,23 @@ def current_log():
     top = [h for h in tops() if win32gui.GetClassName(h) == 'LifeViewWnd'][0]
     m = re.search(r'([A-Za-z]:\\.*\.LRD)', win32gui.GetWindowText(top), re.I)
     return m.group(1) if m else None
+
+
+def activate_all(top=None):
+    """Channel > Add > All: switches on every channel in one go (LifeView only exports active ones)."""
+    top = top or [h for h in tops() if win32gui.GetClassName(h) == 'LifeViewWnd'][0]
+    chan_btn = sorted(children(top, 'LRButton'), key=lambda h: win32gui.GetWindowRect(h)[0])[4]  # 5th: Channel
+    before = set(tops())
+    msg_click(chan_btn)
+    menu = wait_new(before, 'TLRListBox')
+    before = set(tops())
+    msg_click(menu, 60, 14)                               # "Add"
+    dlg = wait_new(before, DIALOG)                        # "Select channels"
+    all_btn = max(children(dlg, 'LRButton'), key=lambda h: win32gui.GetWindowRect(h)[0])  # "All - F10"
+    msg_click(all_btn)                                    # adds everything and closes the dialog
+    t = time.time()
+    while dlg in tops() and time.time() - t < 5:
+        time.sleep(0.04)
 
 
 def export(outname):
@@ -168,7 +185,7 @@ def main(force=None, outname=None):
     export(TMP_NAME)
     last, t0, found = -1, time.time(), None
     while time.time() - t0 < 180:                         # wait until the new file stops growing
-        time.sleep(1.5)
+        time.sleep(0.4)
         new = [p for p in glob.glob(os.path.join(folder, '*.csv'))
                if os.path.getmtime(p) >= started and os.path.abspath(p) != os.path.abspath(target)]
         found = max(new, key=os.path.getmtime) if new else None

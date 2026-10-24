@@ -21,7 +21,6 @@ import win32con
 import win32gui
 import win32process
 
-import lv_activate_all
 import lv_export_csv as ex
 
 
@@ -33,11 +32,21 @@ def close_lifeview():
     for h in top_windows('LifeViewWnd'):
         win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
     t = time.time()
-    while ex.lifeview_pids() and time.time() - t < 5:
-        time.sleep(0.5)
+    while ex.lifeview_pids() and time.time() - t < 3:
+        time.sleep(0.1)
     for pid in ex.lifeview_pids():                      # still open (a save prompt?): end it
         psutil.Process(pid).kill()
-    time.sleep(1)
+    time.sleep(0.2)
+
+
+def wait_ready(top, timeout=20):
+    """The log is loaded once the Channel menu buttons exist and the channel list has been drawn."""
+    t = time.time()
+    while time.time() - t < timeout:
+        if len(ex.children(top, 'LRButton')) >= 12 and ex.children(top, 'TLRListBox'):
+            time.sleep(0.4)
+            return
+        time.sleep(0.1)
 
 
 def open_log(lrd, timeout=60):
@@ -46,7 +55,7 @@ def open_log(lrd, timeout=60):
     clicked = False
     want = os.path.basename(lrd).lower()
     while time.time() - t < timeout:
-        time.sleep(1)
+        time.sleep(0.15)
         if not clicked:
             for dlg in top_windows(ex.DIALOG):
                 buttons = ex.children(dlg, 'LRButton')
@@ -56,7 +65,7 @@ def open_log(lrd, timeout=60):
                     clicked = True
         for h in top_windows('LifeViewWnd'):
             if want in win32gui.GetWindowText(h).lower():
-                time.sleep(3)                            # let it finish loading
+                wait_ready(h)
                 return
     raise RuntimeError('LifeView did not open ' + os.path.basename(lrd))
 
@@ -77,10 +86,15 @@ def main():
     for lrd in todo:
         name = os.path.basename(lrd)
         try:
-            print('opening', name)
+            print('opening', name, flush=True)
+            t0 = time.perf_counter()
             open_log(lrd)
-            lv_activate_all.main()
+            t1 = time.perf_counter()
+            ex.activate_all()
+            t2 = time.perf_counter()
             ex.main(force=True)
+            t3 = time.perf_counter()
+            print(f'  open {t1 - t0:.1f}s, activate {t2 - t1:.1f}s, export {t3 - t2:.1f}s', flush=True)
         except Exception:                                # keep going with the other logs
             traceback.print_exc()
             failed.append(name)
