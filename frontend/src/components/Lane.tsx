@@ -10,6 +10,11 @@ const RULE = "#333333";
 const FONT = '12px "Barlow Semi Condensed", system-ui, sans-serif';
 const SYNC = { key: "let", setSeries: false, scales: ["x", null] as [string, null] };
 
+/** Channels in a lane, once each: the same channel from several logs is one trace group. */
+export function channelGroups(series: { channel: string }[]): string[] {
+  return [...new Set(series.map((s) => s.channel))];
+}
+
 export function stateLabel(states: Record<string, string> | undefined, v: number | null | undefined) {
   return states && v != null ? states[String(Math.round(v))] : undefined;
 }
@@ -30,6 +35,7 @@ type Props = {
 export function Lane({ lane, colorOffset, isLast }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
+  const eventsRef = useRef<{ rule: string; t_start: number; t_end: number }[]>([]);
   const applyingRef = useRef(false); // true while we reload data, so the zoom store is left alone
   const [width, setWidth] = useState(0);
   const [readout, setReadout] = useState<{ t: number | null; v: (number | null)[] }>({ t: null, v: [] });
@@ -47,7 +53,9 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     const ch = src?.channels.find((c) => c.name === s.channel);
     return { name: s.channel, unit: ch?.unit ?? "", source: src?.label ?? "", states: ch?.states };
   });
-  const title = meta.map((m) => (m.unit ? `${m.name} (${m.unit})` : m.name)).join(", ");
+  const groups = channelGroups(lane.series);
+  const gmeta = groups.map((ch) => meta.find((m) => m.name === ch)!);
+  const title = gmeta.map((m) => (m.unit ? `${m.name} (${m.unit})` : m.name)).join(", ");
 
   // Track the container width.
   useEffect(() => {
@@ -64,7 +72,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     const el = boxRef.current;
     if (!el || width < 50) return;
     const height = el.clientHeight || 160;
-    const n = lane.series.length;
+    const n = groups.length;
     const state = useStore.getState();
     const [e0, e1] = extentOf(state.sources);
     const initial = state.view ?? [e0, e1];
@@ -121,15 +129,69 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       ],
       series: [
         {},
-        ...lane.series.map((s, i) => ({
+        ...lane.series.map((s) => ({
           label: s.channel,
-          stroke: TRACE[(colorOffset + i) % TRACE.length],
+          stroke: TRACE[(colorOffset + groups.indexOf(s.channel)) % TRACE.length],
           width: 1.5,
           spanGaps: true,
           points: { show: false },
         })),
       ],
       hooks: {
+        drawClear: [
+          (u) => {
+            const { ctx } = u;
+            const { left, top, width, height } = u.bbox;
+            ctx.save();
+            ctx.fillStyle = "rgba(242, 242, 242, 0.09)";
+            for (const e of eventsRef.current) {
+              const a = Math.max(u.valToPos(e.t_start, "x", true), left);
+              const b = Math.min(u.valToPos(Math.max(e.t_end, e.t_start), "x", true), left + width);
+              if (b < left || a > left + width) continue;
+              ctx.fillRect(a, top, Math.max(b - a, 2 * devicePixelRatio), height);
+            }
+            ctx.restore();
+          },
+        ],
+        draw: [
+          (u) => {
+            const logs = useStore.getState().sources.filter((s) => lane.series.some((x) => x.sourceId === s.id));
+            if (logs.length < 2) return;
+            const { ctx } = u;
+            const { left, top, width, height } = u.bbox;
+            ctx.save();
+            ctx.strokeStyle = ASH;
+            ctx.fillStyle = ASH;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.font = FONT.replace("12px", `${12 * devicePixelRatio}px`);
+            for (const s of logs) {
+              const x = u.valToPos(s.offset_s, "x", true);
+              if (x < left || x > left + width) continue;
+              ctx.beginPath();
+              ctx.moveTo(x, top);
+              ctx.lineTo(x, top + height);
+              ctx.stroke();
+              ctx.fillText(s.started_at ? s.started_at.slice(11, 19) : s.label, x + 4 * devicePixelRatio, top + 12 * devicePixelRatio);
+            }
+            ctx.restore();
+          },
+          (u) => {
+            if (!eventsRef.current.length) return;
+            const { ctx } = u;
+            const { left, top, width } = u.bbox;
+            ctx.save();
+            ctx.fillStyle = "#f2f2f2";
+            ctx.font = FONT.replace("12px", `${11 * devicePixelRatio}px`);
+            for (const e of eventsRef.current) {
+              const a = u.valToPos(e.t_start, "x", true);
+              if (a < left || a > left + width - 20 * devicePixelRatio) continue;
+              ctx.fillRect(a, top, 2 * devicePixelRatio, 10 * devicePixelRatio); // marker, not colour alone
+              ctx.fillText(e.rule, a + 5 * devicePixelRatio, top + 22 * devicePixelRatio);
+            }
+            ctx.restore();
+          },
+        ],
         setScale: [
           (u, key) => {
             if (key !== "x" || applyingRef.current) return;
@@ -151,11 +213,22 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
                 return;
               }
               const idxs = (u.cursor as unknown as { idxs?: (number | null)[] }).idxs;
-              const vals = lane.series.map((_s, i) => {
-                const k = idxs?.[i + 1] ?? idx;
-                return k == null ? null : ((u.data[i + 1][k] as number | null | undefined) ?? null);
+              const tc = (u.data[0][idx] as number) ?? null;
+              // a log only counts at the cursor if it has a sample close to it (logs sit side by side)
+              const span = (u.scales.x.max ?? 0) - (u.scales.x.min ?? 0);
+              const tol = (span / Math.max(u.bbox.width / devicePixelRatio, 1)) * 3;
+              const vals = groups.map((ch) => {
+                let found: number | null = null;
+                lane.series.forEach((s, i) => {
+                  if (found != null || s.channel !== ch || tc == null) return;
+                  const k = idxs?.[i + 1] ?? idx;
+                  if (k == null) return;
+                  const v = u.data[i + 1][k] as number | null | undefined;
+                  if (v != null && Math.abs((u.data[0][k] as number) - tc) <= tol) found = v;
+                });
+                return found;
               });
-              setReadout({ t: (u.data[0][idx] as number) ?? null, v: vals });
+              setReadout({ t: tc, v: vals });
             });
           },
         ],
@@ -176,6 +249,27 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesKey, isLast, width > 50]);
+
+  // Event spans from the rules of every log in this lane, drawn as shaded bands.
+  const rulesKey = sources
+    .filter((s) => lane.series.some((x) => x.sourceId === s.id))
+    .map((s) => `${s.id}:${s.offset_s}:${(s.rules ?? []).map((r) => r.name + r.expr + r.min_duration_s).join("|")}`)
+    .join(";");
+  useEffect(() => {
+    let live = true;
+    const ids = [...new Set(lane.series.map((s) => s.sourceId))].filter(
+      (id) => (sources.find((s) => s.id === id)?.rules ?? []).length > 0,
+    );
+    Promise.all(ids.map((id) => api.events(id).catch(() => []))).then((all) => {
+      if (!live) return;
+      eventsRef.current = all.flat();
+      plotRef.current?.redraw(false);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rulesKey, rev, seriesKey]);
 
   // Keep the plot size in step with its container.
   useEffect(() => {
@@ -238,7 +332,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesKey, windowKey, rev, width > 50, sources.length, isLast]); // isLast: the plot is rebuilt empty when it changes
 
-  const solo = lane.series.length === 1;
+  const solo = groups.length === 1;
 
   return (
     <section className="lane" aria-label={`Plot: ${title}`}>
@@ -248,19 +342,22 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       </div>
       <aside className="readout" aria-label={`Values at cursor for ${title}`}>
         <div className="ro-time">{readout.t == null ? "Cursor off" : `t ${readout.t.toFixed(2)} s`}</div>
-        {lane.series.map((s, i) => (
-          <div className="ro-row" key={`${s.sourceId}|${s.channel}`}>
-            <span className="swatch" style={{ background: TRACE[(colorOffset + i) % TRACE.length] }} aria-hidden />
-            <span className="ro-name">
-              {s.channel}
-              <small>{meta[i].source}</small>
-            </span>
-            <span className={solo ? "ro-val big" : "ro-val"}>
-              {stateLabel(meta[i].states, readout.v[i]) ?? formatValue(readout.v[i])}
-              <small>{meta[i].states ? "" : meta[i].unit}</small>
-            </span>
-          </div>
-        ))}
+        {groups.map((ch, i) => {
+          const logs = lane.series.filter((s) => s.channel === ch).length;
+          return (
+            <div className="ro-row" key={ch}>
+              <span className="swatch" style={{ background: TRACE[(colorOffset + i) % TRACE.length] }} aria-hidden />
+              <span className="ro-name">
+                {ch}
+                <small>{logs > 1 ? `${logs} logs` : gmeta[i].source}</small>
+              </span>
+              <span className={solo ? "ro-val big" : "ro-val"}>
+                {stateLabel(gmeta[i].states, readout.v[i]) ?? formatValue(readout.v[i])}
+                <small>{gmeta[i].states ? "" : gmeta[i].unit}</small>
+              </span>
+            </div>
+          );
+        })}
         <button className="lane-remove" onClick={() => removeLane(lane.id)}>
           Remove plot
         </button>

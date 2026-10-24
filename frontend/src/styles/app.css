@@ -578,3 +578,20 @@ select {
   position: absolute;
   left: -9999px;
 }
+
+/* ---- all-logs list ----------------------------------------------------- */
+
+.all-logs .filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0;
+  background: var(--black);
+  border: 1px solid var(--rule);
+  padding: 4px 6px;
+  color: var(--chalk);
+}
+.channels.all {
+  max-height: 260px;
+  overflow: auto;
+  border-bottom: 1px solid var(--rule);
+}

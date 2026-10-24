@@ -50,6 +50,7 @@ type State = {
   removeDerived: (id: string, name: string) => Promise<void>;
   removeSource: (id: string) => Promise<void>;
   addLane: (s: LaneSeries, overlay: boolean) => void;
+  addChannelAll: (channel: string, overlay: boolean) => void;
   removeLane: (id: number) => void;
   setView: (v: [number, number] | null) => void;
   clearMessage: () => void;
@@ -171,6 +172,22 @@ export const useStore = create<State>((set, get) => ({
         return { lanes: [...s.lanes.slice(0, -1), { ...last, series: [...last.series, series] }] };
       }
       return { lanes: [...s.lanes, { id: laneId++, series: [series] }] };
+    }),
+
+  addChannelAll: (channel, overlay) =>
+    set((s) => {
+      // one trace group across every log that has the channel, in timeline order
+      const list: LaneSeries[] = [...s.sources]
+        .filter((src) => src.channels.some((c) => c.name === channel))
+        .sort((a, b) => a.offset_s - b.offset_s)
+        .map((src) => ({ sourceId: src.id, channel }));
+      if (!list.length) return s;
+      const last = s.lanes[s.lanes.length - 1];
+      if (overlay && last) {
+        const fresh = list.filter((n) => !last.series.some((x) => x.sourceId === n.sourceId && x.channel === n.channel));
+        return { lanes: [...s.lanes.slice(0, -1), { ...last, series: [...last.series, ...fresh] }] };
+      }
+      return { lanes: [...s.lanes, { id: laneId++, series: list }] };
     }),
 
   removeLane: (id) => set((s) => ({ lanes: s.lanes.filter((l) => l.id !== id) })),

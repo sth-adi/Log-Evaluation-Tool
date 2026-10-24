@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Analysis } from "./components/Analysis";
-import { Lane, TRACE } from "./components/Lane";
+import { Lane, TRACE, channelGroups } from "./components/Lane";
 import { Sidebar } from "./components/Sidebar";
 import { extentOf, useStore } from "./store";
 
@@ -129,7 +129,7 @@ export default function App() {
         ) : (
           lanes.map((lane, i) => {
             const offset = colorOffset;
-            colorOffset += lane.series.length;
+            colorOffset += channelGroups(lane.series).length;
             return <Lane key={lane.id} lane={lane} colorOffset={offset % TRACE.length} isLast={i === lanes.length - 1} />;
           })
         )}

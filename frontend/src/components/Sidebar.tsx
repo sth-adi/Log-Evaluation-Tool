@@ -9,6 +9,7 @@ export function Sidebar() {
   const removeSource = useStore((s) => s.removeSource);
   const arrange = useStore((s) => s.arrange);
   const addDerived = useStore((s) => s.addDerived);
+  const addChannelAll = useStore((s) => s.addChannelAll);
   const removeDerived = useStore((s) => s.removeDerived);
 
   if (!sources.length) {
@@ -33,6 +34,7 @@ export function Sidebar() {
           </button>
         </div>
       )}
+      {sources.length > 1 && <AllLogs onPick={addChannelAll} />}
       {sources.map((src) => (
         <SourceBlock
           key={src.id}
@@ -188,5 +190,47 @@ function MathForm({ onAdd }: { onAdd: (name: string, expr: string, unit: string)
         Add
       </button>
     </details>
+  );
+}
+
+/** Channels found in any log; picking one plots it across every log that has it, on one timeline. */
+function AllLogs({ onPick }: { onPick: (channel: string, overlay: boolean) => void }) {
+  const sources = useStore((s) => s.sources);
+  const [filter, setFilter] = useState("");
+  const channels = new Map<string, { unit: string; logs: number }>();
+  for (const src of sources)
+    for (const c of src.channels) {
+      const e = channels.get(c.name);
+      if (e) e.logs += 1;
+      else channels.set(c.name, { unit: c.unit, logs: 1 });
+    }
+  const shown = [...channels].filter(([n]) => n.toLowerCase().includes(filter.toLowerCase()));
+  return (
+    <section className="source all-logs">
+      <header className="source-head">
+        <h3>All logs</h3>
+      </header>
+      <p className="muted small">
+        {sources.length} logs on one timeline. Click a channel to plot it across all of them.
+      </p>
+      <input
+        className="filter"
+        type="search"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Find a channel"
+        aria-label="Find a channel"
+      />
+      <ul className="channels all">
+        {shown.map(([name, c]) => (
+          <li key={name}>
+            <button className="channel" onClick={(e) => onPick(name, e.shiftKey)} title={`${name}: in ${c.logs} of ${sources.length} logs`}>
+              <span>{name}</span>
+              <span className="muted">{c.logs < sources.length ? `${c.logs}/${sources.length} ` : ""}{c.unit}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
