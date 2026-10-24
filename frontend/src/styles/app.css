@@ -520,3 +520,61 @@ select {
   color: var(--ash);
   font-size: var(--t12);
 }
+
+/* ---- events ----------------------------------------------------------- */
+
+.rule-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.rule-form label.inline {
+  display: grid;
+  gap: 3px;
+  color: var(--ash);
+  font-size: var(--t12);
+}
+.rule-form label.grow {
+  flex: 1 1 280px;
+}
+.rule-form input {
+  background: var(--black);
+  border: 1px solid var(--rule);
+  padding: 4px 6px;
+  color: var(--chalk);
+  min-width: 0;
+}
+.rule-error {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--chalk);
+  border-left: 3px solid var(--red);
+  background: var(--graphite);
+}
+.rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.rules li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.rules .link {
+  margin-left: auto;
+}
+.events code,
+.mathform code {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--chalk);
+}
+.sr {
+  position: absolute;
+  left: -9999px;
+}

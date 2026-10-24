@@ -149,6 +149,41 @@ def signals(
         raise HTTPException(422, str(e)) from e
 
 
+class RuleBody(BaseModel):
+    name: str
+    expr: str
+    min_duration_s: float = 0.0
+    merge_gap_s: float = 0.0
+
+
+@app.post("/api/sources/{source_id}/rules")
+def add_rule(source_id: str, body: RuleBody) -> dict:
+    try:
+        return store.add_rule(source_id, body.name, body.expr, body.min_duration_s, body.merge_gap_s)
+    except KeyError:
+        raise HTTPException(404, "unknown source") from None
+    except FormulaError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.delete("/api/sources/{source_id}/rules/{name}")
+def remove_rule(source_id: str, name: str) -> dict:
+    try:
+        return store.remove_rule(source_id, name)
+    except KeyError:
+        raise HTTPException(404, "unknown source or rule") from None
+
+
+@app.get("/api/sources/{source_id}/events")
+def events(source_id: str) -> list[dict]:
+    try:
+        return store.list_events(source_id)
+    except KeyError:
+        raise HTTPException(404, "unknown source") from None
+    except FormulaError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 def _window(source_id: str, channels: list[str], t0, t1):
     try:
         t, arr = store.read_window(source_id, channels, t0, t1)

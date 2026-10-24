@@ -25,7 +25,10 @@ export type Source = {
   channels: Channel[];
   assumptions: string[];
   warnings: string[];
+  rules?: Rule[];
 };
+
+export type Rule = { name: string; expr: string; min_duration_s: number; merge_gap_s: number };
 
 export type LaneSeries = { sourceId: string; channel: string };
 export type Lane = { id: number; series: LaneSeries[] };

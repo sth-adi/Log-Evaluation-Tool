@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from . import derived as derived_mod
+from . import events as events_mod
 from .downsample import minmax_downsample
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -196,6 +197,65 @@ def read_window(
     else:
         t, arr = _query_window(source_id, ["time_s", *channels], lo, hi)
     return t + offset, arr
+
+
+MAX_RULES = 50
+
+
+def _rule_flag(source_id: str, rec: dict, expr: str) -> tuple[np.ndarray, np.ndarray]:
+    derived = {d["name"]: d for d in rec.get("derived", [])}
+    derived["__rule__"] = {"name": "__rule__", "expr": expr}
+    t, vals = _eval_derived(source_id, rec, derived, ["__rule__"])
+    return t, vals["__rule__"]
+
+
+def add_rule(source_id: str, name: str, expr: str, min_duration_s: float, merge_gap_s: float) -> dict:
+    """Add an event rule: a true/false formula plus how long it must hold. Validates the formula."""
+    name = name.strip()
+    with _lock:
+        rec = get_source(source_id)
+        rules = rec.setdefault("rules", [])
+        if not name or len(name) > 60:
+            raise derived_mod.FormulaError("Rule name must be 1-60 characters")
+        if any(r["name"] == name for r in rules):
+            raise derived_mod.FormulaError(f"A rule called '{name}' already exists")
+        if len(rules) >= MAX_RULES:
+            raise derived_mod.FormulaError(f"At most {MAX_RULES} rules per log")
+        _rule_flag(source_id, rec, expr)  # raises FormulaError if invalid
+        rules.append(
+            {
+                "name": name,
+                "expr": expr.strip(),
+                "min_duration_s": max(float(min_duration_s), 0.0),
+                "merge_gap_s": max(float(merge_gap_s), 0.0),
+            }
+        )
+        (_folder(source_id) / "meta.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        return rec
+
+
+def remove_rule(source_id: str, name: str) -> dict:
+    with _lock:
+        rec = get_source(source_id)
+        rules = rec.get("rules", [])
+        if not any(r["name"] == name for r in rules):
+            raise KeyError(name)
+        rec["rules"] = [r for r in rules if r["name"] != name]
+        (_folder(source_id) / "meta.json").write_text(json.dumps(rec, indent=2), encoding="utf-8")
+        return rec
+
+
+def list_events(source_id: str) -> list[dict]:
+    """Every rule's events on the shared time axis, earliest first."""
+    rec = get_source(source_id)
+    offset = float(rec.get("offset_s", 0.0))
+    out: list[dict] = []
+    for rule in rec.get("rules", []):
+        t, flag = _rule_flag(source_id, rec, rule["expr"])
+        for e in events_mod.find_events(t, flag, rule["min_duration_s"], rule["merge_gap_s"]):
+            out.append({"rule": rule["name"], **e, "t_start": e["t_start"] + offset, "t_end": e["t_end"] + offset})
+    out.sort(key=lambda e: e["t_start"])
+    return out
 
 
 def add_derived(source_id: str, name: str, expr: str, unit: str = "") -> dict:

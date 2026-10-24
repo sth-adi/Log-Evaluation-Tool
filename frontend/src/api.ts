@@ -86,6 +86,24 @@ export const api = {
       { x, y, t0, t1 },
     ),
 
+  addRule: (id: string, body: { name: string; expr: string; min_duration_s: number; merge_gap_s: number }) =>
+    fetch(`/api/sources/${id}/rules`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => parse<Source>(r)),
+
+  removeRule: (id: string, name: string) =>
+    fetch(`/api/sources/${id}/rules/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) =>
+      parse<Source>(r),
+    ),
+
+  events: (id: string) =>
+    getJson<{ rule: string; t_start: number; t_end: number; duration_s: number; samples: number }[]>(
+      `/api/sources/${id}/events`,
+      {},
+    ),
+
   remove: (id: string) => fetch(`/api/sources/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
 
   signals: (id: string, channels: string[], t0: number, t1: number, px: number) => {

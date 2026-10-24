@@ -4,12 +4,13 @@ import { api } from "../api";
 import { extentOf, useStore, type LaneSeries } from "../store";
 import { TRACE, formatValue } from "./Lane";
 
-type Kind = "stats" | "histogram" | "spectrum" | "scatter";
+type Kind = "stats" | "histogram" | "spectrum" | "scatter" | "events";
 const KINDS: { id: Kind; label: string }[] = [
   { id: "stats", label: "Statistics" },
   { id: "histogram", label: "Histogram" },
   { id: "spectrum", label: "Spectrum" },
   { id: "scatter", label: "Scatter" },
+  { id: "events", label: "Events" },
 ];
 
 const ASH = "#9a9a9a";
@@ -59,14 +60,15 @@ export function Analysis() {
             </button>
           ))}
         </div>
-        {kind !== "stats" && (
+        {kind !== "stats" && kind !== "events" && (
           <ChannelSelect label={kind === "scatter" ? "X" : "Channel"} value={chosenA} onChange={setA} />
         )}
         {kind === "scatter" && <ChannelSelect label="Y" value={chosenB} onChange={setB} />}
-        <span className="muted small">Using {windowText}. Zoom a plot to change it.</span>
+        {kind !== "events" && <span className="muted small">Using {windowText}. Zoom a plot to change it.</span>}
       </div>
 
       <div className="analysis-body">
+        {kind === "events" && <EventsPanel />}
         {kind === "stats" && <StatsTable series={plotted} t0={t0} t1={t1} rev={rev} />}
         {kind === "histogram" && chosenA && <HistogramChart k={chosenA} t0={t0} t1={t1} rev={rev} />}
         {kind === "spectrum" && chosenA && <SpectrumChart k={chosenA} t0={t0} t1={t1} rev={rev} />}
@@ -293,5 +295,139 @@ function ScatterChart({ kx, ky, t0, t1, rev }: { kx: string; ky: string; t0?: nu
         series: [{}, { stroke: TRACE[2], width: 0, paths: () => null, points: { show: true, size: 4, fill: TRACE[2] + "aa", stroke: TRACE[2] } }],
       })}
     />
+  );
+}
+
+function EventsPanel() {
+  const sources = useStore((s) => s.sources);
+  const refresh = useStore((s) => s.refresh);
+  const setView = useStore((s) => s.setView);
+  const setMode = useStore((s) => s.setMode);
+  const [srcId, setSrcId] = useState("");
+  const id = srcId || sources[0]?.id || "";
+  const src = sources.find((s) => s.id === id);
+  const rules = src?.rules ?? [];
+
+  const [name, setName] = useState("");
+  const [expr, setExpr] = useState("");
+  const [minDur, setMinDur] = useState("0.5");
+  const [err, setErr] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const { data: events, error } = useFetched(() => (id ? api.events(id) : Promise.resolve([])), [id, rules.map((r) => r.name + r.expr).join("|"), tick, src?.offset_s]);
+
+  const add = async () => {
+    setErr(null);
+    try {
+      await api.addRule(id, { name: name.trim(), expr, min_duration_s: parseFloat(minDur) || 0, merge_gap_s: 0 });
+      setName("");
+      setExpr("");
+      await refresh();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  const remove = async (n: string) => {
+    await api.removeRule(id, n);
+    await refresh();
+    setTick((x) => x + 1);
+  };
+  const show = (a: number, b: number) => {
+    const pad = Math.max((b - a) * 0.5, 1);
+    setView([a - pad, b + pad]);
+    setMode("plots");
+  };
+
+  return (
+    <div className="events">
+      <div className="rule-form">
+        {sources.length > 1 && (
+          <label className="inline">
+            Log
+            <select value={id} onChange={(e) => setSrcId(e.target.value)}>
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="inline">
+          Rule name
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Coolant hot" />
+        </label>
+        <label className="inline grow">
+          Condition
+          <input
+            value={expr}
+            onChange={(e) => setExpr(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && name.trim() && expr.trim() && void add()}
+            placeholder="ect1 > 95 and rpm > 3000"
+            spellCheck={false}
+          />
+        </label>
+        <label className="inline">
+          For at least (s)
+          <input type="number" min="0" step="0.1" value={minDur} onChange={(e) => setMinDur(e.target.value)} />
+        </label>
+        <button className="primary" disabled={!name.trim() || !expr.trim() || !id} onClick={() => void add()}>
+          Add rule
+        </button>
+      </div>
+      {err && <p className="rule-error" role="alert">{err}</p>}
+      <p className="muted small pad">
+        A condition is a formula that is true or false at each sample, using channel names and math channels, for
+        example <code>rpm &gt; 11500</code>, <code>vehicleSpeed &lt; 1 and rpm &gt; 4000</code>. An event is a stretch where it
+        stays true.
+      </p>
+
+      {rules.length > 0 && (
+        <ul className="rules">
+          {rules.map((r) => (
+            <li key={r.name}>
+              <strong>{r.name}</strong> <code>{r.expr}</code>
+              <span className="muted small"> for at least {r.min_duration_s} s</span>
+              <button className="link" onClick={() => void remove(r.name)} aria-label={`Remove rule ${r.name}`}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error ? (
+        <p className="rule-error" role="alert">{error}</p>
+      ) : rules.length === 0 ? null : !events ? (
+        <p className="muted pad">Loading</p>
+      ) : events.length === 0 ? (
+        <p className="muted pad">No events: none of the rules held for long enough.</p>
+      ) : (
+        <table className="stats">
+          <thead>
+            <tr>
+              <th scope="col">Rule</th>
+              <th scope="col" className="num">Start (s)</th>
+              <th scope="col" className="num">End (s)</th>
+              <th scope="col" className="num">Length (s)</th>
+              <th scope="col"><span className="sr">Jump</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((e, i) => (
+              <tr key={i}>
+                <th scope="row">{e.rule}</th>
+                <td className="num">{formatValue(e.t_start)}</td>
+                <td className="num">{formatValue(e.t_end)}</td>
+                <td className="num">{formatValue(e.duration_s)}</td>
+                <td>
+                  <button className="link" onClick={() => show(e.t_start, e.t_end)}>
+                    Show on plots
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }

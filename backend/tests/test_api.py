@@ -130,3 +130,22 @@ def test_analysis_endpoints(client, synthetic):
     client.post(f"/api/sources/{sid}/derived", json={"name": "r2", "expr": "RPM * 2"})
     d = client.get(f"/api/sources/{sid}/stats", params={"channels": "RPM,r2"}).json()["channels"]
     assert d["r2"]["max"] == pytest.approx(2 * d["RPM"]["max"])
+
+
+def test_event_rules(client, synthetic):
+    ecu, _ = synthetic
+    sid = client.post("/api/sources", files={"file": ("ecu.csv", ecu.to_csv(index=False).encode())}).json()["id"]
+    top = float(ecu["RPM"].max())
+    body = {"name": "High rpm", "expr": f"RPM > {top * 0.9}", "min_duration_s": 0.05}
+    r = client.post(f"/api/sources/{sid}/rules", json=body)
+    assert r.status_code == 200 and r.json()["rules"][0]["name"] == "High rpm"
+    ev = client.get(f"/api/sources/{sid}/events").json()
+    assert ev and all(e["rule"] == "High rpm" and e["t_end"] >= e["t_start"] for e in ev)
+    assert [e["t_start"] for e in ev] == sorted(e["t_start"] for e in ev)
+    # offsets move the events
+    client.patch(f"/api/sources/{sid}", json={"offset_s": 100})
+    assert client.get(f"/api/sources/{sid}/events").json()[0]["t_start"] > 100
+    assert client.post(f"/api/sources/{sid}/rules", json=body).status_code == 422  # duplicate name
+    assert client.post(f"/api/sources/{sid}/rules", json={"name": "x", "expr": "nope > 1"}).status_code == 422
+    assert client.delete(f"/api/sources/{sid}/rules/High rpm").status_code == 200
+    assert client.get(f"/api/sources/{sid}/events").json() == []
