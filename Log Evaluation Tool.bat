@@ -4,7 +4,13 @@ cd /d "%~dp0"
 set PORT=8000
 set URL=http://127.0.0.1:%PORT%
 
-if not exist ".venv\Scripts\python.exe" (
+rem Packaged copy: use the Python that ships beside this file, and keep logs outside the folder
+rem so unpacking a newer version never loses them.
+set PY=.venv\Scripts\python.exe
+if exist "python\python.exe" set PY=python\python.exe
+if exist "python\python.exe" if not defined LET_DATA_DIR set "LET_DATA_DIR=%LOCALAPPDATA%\Log Evaluation Tool"
+
+if not exist "%PY%" (
   echo The tool is not set up on this computer yet.
   echo Open PowerShell in this folder and run:  .\scripts\setup.ps1
   pause
@@ -15,7 +21,7 @@ rem Already running? Then just open it.
 curl -s -o nul -f %URL%/api/health && goto open
 
 echo Starting Log Evaluation Tool...
-start "Log Evaluation Tool - close this window to stop it" /min ".venv\Scripts\python.exe" -m uvicorn backend.app.main:app --host 127.0.0.1 --port %PORT%
+start "Log Evaluation Tool - close this window to stop it" /min "%PY%" -m uvicorn backend.app.main:app --host 127.0.0.1 --port %PORT%
 
 set /a tries=0
 :wait

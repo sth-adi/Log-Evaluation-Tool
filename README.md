@@ -18,6 +18,16 @@ The backend has automated tests. The Windows scripts and the browser UI have not
 
 Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desktop). It starts the tool, waits until it is ready and opens http://127.0.0.1:8000 in your browser. If it is already running it just opens the page. A minimised window stays in the taskbar while the tool runs; close that window to stop it. Binds to 127.0.0.1 only, so nothing is visible on the network.
 
+## Giving it to someone else
+
+Build a package that runs on any Windows 10/11 PC with nothing installed (no Python, no Node, no admin rights, no internet):
+
+```powershell
+.\scripts\build-portable.ps1        # about 2 minutes; writes release\LogEvaluationTool-win64.zip (about 80 MB)
+```
+
+Send that zip. The other person unzips it anywhere and double-clicks **`Log Evaluation Tool.bat`**; their browser opens the tool. It carries its own private Python and every package. Their logs and library are kept in `%LOCALAPPDATA%\Log Evaluation Tool`, so unpacking a newer version later keeps them. Converting `.LRD` logs still needs LifeView on that PC (CSV import does not). The zip is built from your working checkout, so run the tests and `npm run build` first.
+
 ## The library
 
 Every converted or imported log is kept in the **Library** (top bar). Closing a log in the Manage drawer only takes it off the screen; **Library > Add** brings it back, with no conversion. Logs are recognised by their contents, so importing the same data again (even from another folder, or a new copy of the `.LRD`) opens the existing log and says so, rather than storing a duplicate. **Open folder** shows the CSV copies in Explorer.
