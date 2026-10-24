@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Analysis } from "./components/Analysis";
 import { Lane, TRACE } from "./components/Lane";
 import { Sidebar } from "./components/Sidebar";
 import { useStore } from "./store";
@@ -8,6 +9,8 @@ export default function App() {
   const sources = useStore((s) => s.sources);
   const message = useStore((s) => s.message);
   const refresh = useStore((s) => s.refresh);
+  const mode = useStore((s) => s.mode);
+  const setMode = useStore((s) => s.setMode);
   const importFiles = useStore((s) => s.importFiles);
   const clearMessage = useStore((s) => s.clearMessage);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -41,6 +44,16 @@ export default function App() {
     >
       <header className="topbar">
         <h1>Log Evaluation Tool</h1>
+        {sources.length > 0 && (
+          <div className="seg" role="tablist" aria-label="View">
+            <button role="tab" aria-selected={mode === "plots"} className={mode === "plots" ? "on" : undefined} onClick={() => setMode("plots")}>
+              Plots
+            </button>
+            <button role="tab" aria-selected={mode === "analysis"} className={mode === "analysis" ? "on" : undefined} onClick={() => setMode("analysis")}>
+              Analysis
+            </button>
+          </div>
+        )}
         <span className="muted hint-zoom">Drag on a plot to zoom. Double-click to reset.</span>
         <button className="primary" onClick={() => fileRef.current?.click()}>
           Import logs
@@ -71,7 +84,9 @@ export default function App() {
       <Sidebar />
 
       <main className="lanes">
-        {lanes.length === 0 ? (
+        {mode === "analysis" && sources.length > 0 ? (
+          <Analysis />
+        ) : lanes.length === 0 ? (
           <div className="empty">
             {sources.length === 0 ? (
               <>

@@ -33,6 +33,8 @@ export type Lane = { id: number; series: LaneSeries[] };
 type State = {
   sources: Source[];
   lanes: Lane[];
+  mode: "plots" | "analysis";
+  setMode: (m: "plots" | "analysis") => void;
   view: [number, number] | null; // null = full extent
   rev: number; // bumped when data on the server changes (offset edits)
   message: { kind: "error" | "info"; text: string } | null;
@@ -59,6 +61,8 @@ export const useStore = create<State>((set, get) => ({
   sources: [],
   lanes: [],
   view: null,
+  mode: "plots",
+  setMode: (mode) => set({ mode }),
   rev: 0,
   message: null,
 

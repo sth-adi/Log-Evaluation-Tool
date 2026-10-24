@@ -175,6 +175,29 @@ def _window_with_derived(
     return t[mask], out
 
 
+def read_window(
+    source_id: str, channels: list[str], t0: float | None, t1: float | None
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Full-resolution samples for the window [t0, t1] (log time + offset), math channels included.
+
+    Returned time is on the shared axis (offset applied).
+    """
+    rec = get_source(source_id)
+    offset = float(rec.get("offset_s", 0.0))
+    known = {c["name"] for c in rec["channels"]}
+    bad = [c for c in channels if c not in known]
+    if bad:
+        raise ValueError(f"unknown channel(s): {', '.join(bad)}")
+    lo = (t0 if t0 is not None else -np.inf) - offset
+    hi = (t1 if t1 is not None else np.inf) - offset
+    derived = {d["name"]: d for d in rec.get("derived", [])}
+    if any(c in derived for c in channels):
+        t, arr = _window_with_derived(source_id, rec, channels, derived, lo, hi)
+    else:
+        t, arr = _query_window(source_id, ["time_s", *channels], lo, hi)
+    return t + offset, arr
+
+
 def add_derived(source_id: str, name: str, expr: str, unit: str = "") -> dict:
     """Add a math channel. Raises FormulaError if the formula is invalid."""
     name = name.strip()

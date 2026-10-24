@@ -14,6 +14,12 @@ async function parse<T>(r: Response): Promise<T> {
   return (r.status === 204 ? undefined : await r.json()) as T;
 }
 
+function getJson<T>(path: string, params: Record<string, string | number | undefined>) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined) q.set(k, String(v));
+  return fetch(`${path}?${q}`).then((r) => parse<T>(r));
+}
+
 export const api = {
   sources: () => fetch("/api/sources").then((r) => parse<Source[]>(r)),
 
@@ -48,6 +54,36 @@ export const api = {
   removeDerived: (id: string, name: string) =>
     fetch(`/api/sources/${id}/derived/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) =>
       parse<Source>(r),
+    ),
+
+  stats: (id: string, channels: string[], t0?: number, t1?: number) =>
+    getJson<{
+      t0: number;
+      t1: number;
+      channels: Record<string, Record<string, number>>;
+    }>(`/api/sources/${id}/stats`, { channels: channels.join(","), t0, t1 }),
+
+  histogram: (id: string, channel: string, bins: number, t0?: number, t1?: number) =>
+    getJson<{ edges: number[]; counts: number[]; total: number }>(`/api/sources/${id}/histogram`, {
+      channel,
+      bins,
+      t0,
+      t1,
+    }),
+
+  spectrum: (id: string, channel: string, t0?: number, t1?: number) =>
+    getJson<{
+      freq_hz: number[];
+      amplitude: number[];
+      peaks: { freq_hz: number; amplitude: number }[];
+      sample_rate_hz: number;
+      samples: number;
+    }>(`/api/sources/${id}/spectrum`, { channel, t0, t1 }),
+
+  scatter: (id: string, x: string, y: string, t0?: number, t1?: number) =>
+    getJson<{ t: number[]; x: number[]; y: number[]; points: number; correlation: number | null }>(
+      `/api/sources/${id}/scatter`,
+      { x, y, t0, t1 },
     ),
 
   remove: (id: string) => fetch(`/api/sources/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),

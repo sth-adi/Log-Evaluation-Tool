@@ -112,3 +112,21 @@ def test_math_channels(client, synthetic):
     assert client.delete(f"/api/sources/{sid}/derived/rps").status_code == 422  # rps2 uses it
     assert client.delete(f"/api/sources/{sid}/derived/rps2").status_code == 200
     assert client.delete(f"/api/sources/{sid}/derived/rps").status_code == 200
+
+
+def test_analysis_endpoints(client, synthetic):
+    ecu, _ = synthetic
+    sid = client.post("/api/sources", files={"file": ("ecu.csv", ecu.to_csv(index=False).encode())}).json()["id"]
+    s = client.get(f"/api/sources/{sid}/stats", params={"channels": "RPM,TPS"}).json()
+    assert s["channels"]["RPM"]["max"] >= s["channels"]["RPM"]["mean"] >= s["channels"]["RPM"]["min"]
+    h = client.get(f"/api/sources/{sid}/histogram", params={"channel": "RPM", "bins": 20}).json()
+    assert sum(h["counts"]) == h["total"] > 0
+    sp = client.get(f"/api/sources/{sid}/spectrum", params={"channel": "RPM", "t0": 1, "t1": 8}).json()
+    assert len(sp["freq_hz"]) == len(sp["amplitude"]) > 10
+    sc = client.get(f"/api/sources/{sid}/scatter", params={"x": "TPS", "y": "RPM"}).json()
+    assert sc["points"] > 100 and len(sc["x"]) == len(sc["t"])
+    assert client.get(f"/api/sources/{sid}/stats", params={"channels": "nope"}).status_code == 422
+    assert client.get(f"/api/sources/{sid}/stats", params={"channels": "RPM", "t0": 1e6}).status_code == 422
+    client.post(f"/api/sources/{sid}/derived", json={"name": "r2", "expr": "RPM * 2"})
+    d = client.get(f"/api/sources/{sid}/stats", params={"channels": "RPM,r2"}).json()["channels"]
+    assert d["r2"]["max"] == pytest.approx(2 * d["RPM"]["max"])

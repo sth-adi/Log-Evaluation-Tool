@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import store
+from . import analysis, store
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
 
@@ -147,6 +147,62 @@ def signals(
         raise HTTPException(404, "unknown source") from None
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+
+
+def _window(source_id: str, channels: list[str], t0, t1):
+    try:
+        t, arr = store.read_window(source_id, channels, t0, t1)
+    except KeyError:
+        raise HTTPException(404, "unknown source") from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    if t.size == 0:
+        raise HTTPException(422, "No samples in that time window")
+    return t, arr
+
+
+@app.get("/api/sources/{source_id}/stats")
+def channel_stats(
+    source_id: str, channels: str = Query(...), t0: float | None = None, t1: float | None = None
+) -> dict:
+    names = [c for c in channels.split(",") if c]
+    t, arr = _window(source_id, names, t0, t1)
+    return {
+        "t0": float(t[0]),
+        "t1": float(t[-1]),
+        "channels": {c: analysis.stats(arr[c], t) for c in names},
+    }
+
+
+@app.get("/api/sources/{source_id}/histogram")
+def channel_histogram(
+    source_id: str,
+    channel: str,
+    bins: int = Query(40, ge=2, le=400),
+    t0: float | None = None,
+    t1: float | None = None,
+) -> dict:
+    _, arr = _window(source_id, [channel], t0, t1)
+    return analysis.histogram(arr[channel], bins)
+
+
+@app.get("/api/sources/{source_id}/spectrum")
+def channel_spectrum(
+    source_id: str, channel: str, t0: float | None = None, t1: float | None = None
+) -> dict:
+    t, arr = _window(source_id, [channel], t0, t1)
+    try:
+        return analysis.spectrum(t, arr[channel])
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.get("/api/sources/{source_id}/scatter")
+def channel_scatter(
+    source_id: str, x: str, y: str, t0: float | None = None, t1: float | None = None
+) -> dict:
+    t, arr = _window(source_id, [x] if x == y else [x, y], t0, t1)
+    return analysis.scatter(t, arr[x], arr[y])
 
 
 # --- serve the built frontend, if present --------------------------------------------------
