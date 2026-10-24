@@ -128,3 +128,26 @@ def test_distance_helpers():
     assert laps.pick_speed(["Rpm", "VehicleSpeed"]) == "VehicleSpeed"
     assert laps.guess_position(["latG", "longG", "gpsLatitude", "gpsLongitude"]) == ("gpsLatitude", "gpsLongitude")
     assert laps.guess_position(["latG", "longG"]) is None
+
+
+def test_laps_compared_across_logs(client):
+    a = upload(client, circuit(lap_times=(20.0, 30.0, 30.0, 5.0)))
+    b = upload(client, circuit(lap_times=(20.0, 28.0, 29.0, 5.0)).assign(latG=lambda d: d.latG + 0.001))
+    r = client.get("/api/lapcompare", params={"sources": f"{a},{b}", "channels": "vehicleSpeed"}).json()
+    assert {l["log"] for l in r["laps"]} == {a, b}
+    assert r["best"] == {"log": b, "n": 1}
+    ref = next(l for l in r["laps"] if l["log"] == b and l["n"] == 1)
+    assert ref["delta_s"][-1] == pytest.approx(0.0, abs=0.05)
+    slow = next(l for l in r["laps"] if l["log"] == a and l["n"] == 1)
+    assert slow["delta_s"][-1] == pytest.approx(2.0, abs=0.15)  # a different session, two seconds off the best
+    pinned = client.get("/api/lapcompare", params={"sources": f"{a},{b}", "channels": "vehicleSpeed", "ref": f"{a}:1", "selected": f"{a}:1,{b}:2"}).json()
+    assert [(l["log"], l["n"]) for l in pinned["laps"]] == [(a, 1), (b, 2)]
+    assert pinned["reference_log"] == a
+
+
+def test_compare_skips_logs_without_laps(client):
+    a = upload(client, circuit())
+    b = upload(client, circuit(timer=False, beacon=False).assign(Time=lambda d: d.Time + 500))
+    r = client.get("/api/lapcompare", params={"sources": f"{a},{b}", "channels": "vehicleSpeed"}).json()
+    assert {l["log"] for l in r["laps"]} == {a}
+    assert r["skipped"] and r["skipped"][0]["id"] == b

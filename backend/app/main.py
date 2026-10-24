@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, laps, lifeview, report, store
+from . import analysis, laps, lifeview, report, store, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
@@ -358,6 +358,32 @@ def channel_scatter(
     return analysis.scatter(t, arr[x], arr[y])
 
 
+class ViewBody(BaseModel):
+    name: str
+    payload: dict
+
+
+@app.get("/api/workspaces")
+def list_views() -> list[dict]:
+    return workspaces.list_all()
+
+
+@app.put("/api/workspaces")
+def save_view(body: ViewBody) -> dict:
+    try:
+        return workspaces.save(body.name, body.payload)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.delete("/api/workspaces/{view_id}", status_code=204)
+def delete_view(view_id: str) -> None:
+    try:
+        workspaces.delete(view_id)
+    except KeyError:
+        raise HTTPException(404, "unknown view") from None
+
+
 class LapQuery:
     """How to find the laps: the same few query parameters on every lap endpoint."""
 
@@ -454,6 +480,53 @@ def lap_view(
         raise HTTPException(422, str(e)) from e
     out["best"] = table["best"]
     out["units"] = {n: c["info"][n]["unit"] for n in names}
+    return out
+
+
+@app.get("/api/lapcompare")
+def lap_compare(
+    sources: str = Query(..., description="comma-separated log ids"),
+    channels: str = Query(..., description="comma-separated channel names"),
+    selected: str = Query("", description="lap keys like id:3, comma-separated; default is every valid lap"),
+    ref: str = "",
+    axis: str = Query("distance", pattern="^(distance|time)$"),
+    points: int = Query(600, ge=50, le=3000),
+    q: LapQuery = Depends(),
+) -> dict:
+    """Laps from several logs on one overlay, compared against one reference lap."""
+    names = [x for x in channels.split(",") if x][:6]
+    ids = [x for x in sources.split(",") if x][:12]
+    if not names or not ids:
+        raise HTTPException(422, "Choose at least one log and one channel")
+    chosen = {x for x in selected.split(",") if x}
+    runs, tables, skipped = [], {}, []
+    for sid in ids:
+        try:
+            have = [n for n in names if n in {c["name"] for c in store.get_source(sid)["channels"]}]
+            c = _lap_context(sid, q, have)
+        except (HTTPException, KeyError) as e:
+            skipped.append({"id": sid, "reason": e.detail if isinstance(e, HTTPException) else "unknown log"})
+            continue
+        table = c["table"]
+        use = [l for l in table["laps"] if (f"{sid}:{l['n']}" in chosen if chosen else l["valid"])]
+        if not use:
+            continue
+        tables[sid] = {"label": c["rec"]["label"], "started_at": c["rec"].get("started_at"), "best": table["best"],
+                       "units": {n: c["info"][n]["unit"] for n in have}}
+        runs.append({"key": sid, "t": c["t"], "dist": c["dist"], "cols": {n: c["cols"][n] for n in have}, "laps": use})
+    if not runs:
+        raise HTTPException(422, "No complete laps found in the chosen logs")
+    best = min(((r["key"], l) for r in runs for l in r["laps"]), key=lambda kl: kl[1]["duration_s"])
+    rk, _, rn = ref.partition(":")
+    ref_pair = (rk, int(rn)) if rn.isdigit() and rk in {r["key"] for r in runs} else (best[0], best[1]["n"])
+    try:
+        out = laps.overlay_runs(runs, ref_pair, axis, points)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    out["best"] = {"log": best[0], "n": best[1]["n"]}
+    out["logs"] = tables
+    out["skipped"] = skipped
+    out["units"] = {n: u for t in tables.values() for n, u in t["units"].items()}
     return out
 
 

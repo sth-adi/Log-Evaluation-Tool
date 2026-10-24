@@ -184,6 +184,56 @@ def _interp(x: np.ndarray, xp: np.ndarray, fp: np.ndarray) -> np.ndarray:
     return np.interp(x, xp[ok], fp[ok], left=np.nan, right=np.nan)
 
 
+def overlay_runs(runs: list[dict], ref: tuple[str, int], axis: str = "distance", points: int = 600) -> dict:
+    """Every chosen lap, from one log or several, on one shared x axis (metres or seconds into the lap).
+
+    ``runs`` holds one dict per log: key, t, dist, cols (the channels to draw) and laps (lap rows).
+    Distance is rescaled so each lap ends exactly at the reference lap's length: wheel-speed
+    integration drifts a little each lap, and without this the laps would slide apart.
+    ``delta_s`` is the time each lap is ahead (-) or behind (+) the reference lap at that point.
+    """
+    use_dist = axis == "distance"
+    by_key = {r["key"]: r for r in runs}
+    rrun = by_key.get(ref[0]) or runs[0]
+    rlap = next((l for l in rrun["laps"] if l["n"] == ref[1]), None) or rrun["laps"][0]
+    if use_dist and any(r["dist"] is None for r in runs):
+        raise ValueError("A speed channel is needed for a distance axis")
+    span = (
+        float(np.interp(rlap["t_end"], rrun["t"], rrun["dist"]) - np.interp(rlap["t_start"], rrun["t"], rrun["dist"]))
+        if use_dist
+        else rlap["duration_s"]
+    )
+    if span <= 0:
+        raise ValueError("The reference lap has no length")
+    grid = np.linspace(0.0, span, int(np.clip(points, 50, 3000)))
+
+    def lap_axes(run: dict, l: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        t, dist = run["t"], run["dist"]
+        m = (t >= l["t_start"]) & (t <= l["t_end"])
+        tl = t[m] - l["t_start"]
+        if not use_dist:
+            return m, tl, tl
+        d = np.maximum.accumulate(dist[m] - np.interp(l["t_start"], t, dist))
+        total = d[-1] if d.size else 0.0
+        return m, (d * (span / total) if total > 0 else d), tl
+
+    _, rx, rt = lap_axes(rrun, rlap)
+    ref_time_at = _interp(grid, rx, rt) if use_dist else None
+    out = []
+    for run in runs:
+        for l in run["laps"]:
+            m, xs, tl = lap_axes(run, l)
+            if m.sum() < 2:
+                continue
+            entry = {"log": run["key"], "n": l["n"], "duration_s": l["duration_s"], "channels": {}}
+            for name, v in run["cols"].items():
+                entry["channels"][name] = [None if not np.isfinite(x) else float(x) for x in _interp(grid, xs, v[m])]
+            if use_dist and ref_time_at is not None:
+                entry["delta_s"] = [None if not np.isfinite(x) else float(x) for x in _interp(grid, xs, tl) - ref_time_at]
+            out.append(entry)
+    return {"axis": axis, "x": grid.tolist(), "reference": rlap["n"], "reference_log": rrun["key"], "laps": out}
+
+
 def overlay(
     t: np.ndarray,
     dist: np.ndarray | None,
@@ -193,49 +243,8 @@ def overlay(
     axis: str = "distance",
     points: int = 600,
 ) -> dict:
-    """Every chosen lap on one shared x axis (metres into the lap, or seconds into the lap).
-
-    Distance is rescaled so each lap ends exactly at the reference lap's length: wheel-speed
-    integration drifts a little each lap, and without this the laps would slide apart.
-    ``delta_s`` is the time each lap is ahead (-) or behind (+) the reference lap at that point.
-    """
-    byn = {l["n"]: l for l in laps}
-    ref = byn.get(ref_n) or laps[0]
-    use_dist = axis == "distance"
-    if use_dist and dist is None:
-        raise ValueError("A speed channel is needed for a distance axis")
-    span = (
-        float(np.interp(ref["t_end"], t, dist) - np.interp(ref["t_start"], t, dist)) if use_dist else ref["duration_s"]
-    )
-    if span <= 0:
-        raise ValueError("The reference lap has no length")
-    grid = np.linspace(0.0, span, int(np.clip(points, 50, 3000)))
-
-    def lap_axes(l: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        m = (t >= l["t_start"]) & (t <= l["t_end"])
-        tl = t[m] - l["t_start"]
-        if not use_dist:
-            return m, tl, tl
-        d = dist[m] - np.interp(l["t_start"], t, dist)
-        d = np.maximum.accumulate(d)
-        total = d[-1] if d.size else 0.0
-        return m, (d * (span / total) if total > 0 else d), tl
-
-    _, rx, rt = lap_axes(ref)
-    ref_time_at = _interp(grid, rx, rt) if use_dist else None
-    out = []
-    for l in laps:
-        m, xs, tl = lap_axes(l)
-        if m.sum() < 2:
-            continue
-        entry = {"n": l["n"], "duration_s": l["duration_s"], "channels": {}}
-        for name, v in cols.items():
-            entry["channels"][name] = [None if not np.isfinite(x) else float(x) for x in _interp(grid, xs, v[m])]
-        if use_dist and ref_time_at is not None:
-            lap_time_at = _interp(grid, xs, tl)
-            entry["delta_s"] = [None if not np.isfinite(x) else float(x) for x in lap_time_at - ref_time_at]
-        out.append(entry)
-    return {"axis": axis, "x": grid.tolist(), "reference": ref["n"], "laps": out}
+    """One log's laps; see overlay_runs."""
+    return overlay_runs([{"key": "", "t": t, "dist": dist, "cols": cols, "laps": laps}], ("", ref_n), axis, points)
 
 
 # --- track shape -----------------------------------------------------------------------------

@@ -1399,3 +1399,68 @@ label {
 .lap-chart .u-legend .u-marker {
   margin-right: 2px;
 }
+
+.lap-table tr.group th {
+  padding-top: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+.lap-table tr.group small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.track-head {
+  flex-wrap: wrap;
+}
+.track-head h3,
+.track-head label {
+  white-space: nowrap;
+}
+.track-head select {
+  max-width: 130px;
+}
+
+/* ---- saved views ---------------------------------------------------------- */
+
+.dialog.views {
+  width: min(640px, calc(100vw - 32px));
+}
+.view-save {
+  display: flex;
+  gap: 8px;
+}
+.view-save input {
+  flex: 1;
+  min-width: 0;
+}
+.view-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+.view-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.view-list .lib-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.view-list .lib-meta {
+  color: var(--muted);
+  font-size: var(--t13);
+}
+.dialog.views footer {
+  align-items: center;
+}

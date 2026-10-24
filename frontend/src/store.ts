@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api } from "./api";
+import { api, type LapParams } from "./api";
 
 export type Channel = {
   name: string;
@@ -57,6 +57,15 @@ export type ConvertView = {
 
 export type Rule = { name: string; expr: string; min_duration_s: number; merge_gap_s: number };
 
+/** What a saved view remembers. It names channels, not logs, so it fits whichever logs are open. */
+export type ViewPayload = {
+  v: 1;
+  mode: "plots" | "analysis" | "laps";
+  lanes: string[][];
+  lap: { params: LapParams; axis: "distance" | "time" };
+};
+export type SavedView = { id: string; name: string; saved_at: string; payload: ViewPayload };
+
 export type LaneSeries = { sourceId: string; channel: string };
 export type Lane = { id: number; series: LaneSeries[] };
 
@@ -83,6 +92,18 @@ type State = {
   recent: string[]; // channels plotted lately, newest first
   addDerivedAll: (name: string, expr: string, unit: string) => Promise<boolean>;
   removeDerivedAll: (name: string) => Promise<void>;
+  lapParams: LapParams;
+  setLapParams: (p: LapParams) => void;
+  lapAxis: "distance" | "time";
+  setLapAxis: (a: "distance" | "time") => void;
+  views: SavedView[];
+  viewsOpen: boolean;
+  setViewsOpen: (open: boolean) => void;
+  loadViews: () => Promise<void>;
+  saveView: (name: string) => Promise<boolean>;
+  openView: (v: SavedView) => void;
+  deleteView: (id: string) => Promise<void>;
+  importViewFile: (file: File) => Promise<void>;
   mode: "plots" | "analysis" | "laps";
   setMode: (m: "plots" | "analysis" | "laps") => void;
   view: [number, number] | null; // null = full extent
@@ -142,6 +163,83 @@ const guessKind = (name: string): Source["kind"] =>
   /hcu/i.test(name) ? "hcu" : /ecu|f88/i.test(name) ? "ecu" : "other";
 
 export const useStore = create<State>((set, get) => ({
+  lapParams: { method: "auto" },
+  setLapParams: (lapParams) => set({ lapParams }),
+  lapAxis: "distance",
+  setLapAxis: (lapAxis) => set({ lapAxis }),
+  views: [],
+  viewsOpen: false,
+  setViewsOpen: (viewsOpen) => {
+    set({ viewsOpen });
+    if (viewsOpen) void get().loadViews();
+  },
+  loadViews: async () => {
+    try {
+      set({ views: await api.views() });
+    } catch {
+      /* saved views are a convenience; the sources list already reports a dead backend */
+    }
+  },
+  saveView: async (name) => {
+    const s = get();
+    const payload: ViewPayload = {
+      v: 1,
+      mode: s.mode,
+      lanes: s.lanes.map((l) => [...new Set(l.series.map((x) => x.channel))]),
+      lap: { params: s.lapParams, axis: s.lapAxis },
+    };
+    try {
+      const rec = await api.saveView(name, payload);
+      await get().loadViews();
+      set({ message: { kind: "info", text: `Saved the view "${rec.name}".` } });
+      return true;
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not save the view. ${(e as Error).message}` } });
+      return false;
+    }
+  },
+  openView: (v) => {
+    const p = v.payload;
+    const known = new Set(get().sources.flatMap((s) => s.channels.map((c) => c.name)));
+    const lanes = Array.isArray(p?.lanes) ? p.lanes.map((l) => (Array.isArray(l) ? l.filter((c) => typeof c === "string") : [])) : [];
+    set({ lanes: [], view: null });
+    let missing = 0;
+    for (const lane of lanes) {
+      const here = lane.filter((c) => known.has(c));
+      missing += lane.length - here.length;
+      here.forEach((c, i) => get().addChannelAll(c, i > 0));
+    }
+    const mode = p?.mode === "analysis" || p?.mode === "laps" ? p.mode : "plots";
+    set({
+      mode,
+      viewsOpen: false,
+      ...(p?.lap?.params?.method ? { lapParams: p.lap.params } : {}),
+      ...(p?.lap?.axis === "time" || p?.lap?.axis === "distance" ? { lapAxis: p.lap.axis } : {}),
+      message: {
+        kind: "info",
+        text: missing ? `Opened "${v.name}". ${missing} channel${missing > 1 ? "s were" : " was"} not in these logs and left out.` : `Opened "${v.name}".`,
+      },
+    });
+  },
+  deleteView: async (id) => {
+    try {
+      await api.deleteView(id);
+      await get().loadViews();
+    } catch (e) {
+      set({ message: { kind: "error", text: (e as Error).message } });
+    }
+  },
+  importViewFile: async (file) => {
+    try {
+      const j = JSON.parse(await file.text());
+      if (!j || typeof j.name !== "string" || typeof j.payload !== "object" || j.payload?.v !== 1) throw new Error("This is not a view file.");
+      const rec = await api.saveView(j.name, j.payload);
+      await get().loadViews();
+      get().openView(rec);
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not open that file. ${(e as Error).message}` } });
+    }
+  },
   sources: [],
   lanes: [],
   view: null,

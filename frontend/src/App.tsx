@@ -4,6 +4,7 @@ import { ConvertDialog } from "./components/ConvertDialog";
 import { Lane, channelGroups } from "./components/Lane";
 import { Laps } from "./components/Laps";
 import { Library } from "./components/Library";
+import { Views } from "./components/Views";
 import { LogDrawer, LogRail } from "./components/LogRail";
 import { Palette } from "./components/Palette";
 import { extentOf, useStore } from "./store";
@@ -23,6 +24,7 @@ export default function App() {
   const library = useStore((s) => s.library);
   const loadLibrary = useStore((s) => s.loadLibrary);
   const setLibraryOpen = useStore((s) => s.setLibraryOpen);
+  const setViewsOpen = useStore((s) => s.setViewsOpen);
   const addChannelAll = useStore((s) => s.addChannelAll);
   const view = useStore((s) => s.view);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -124,6 +126,11 @@ export default function App() {
         <button className="btn" onClick={() => setLibraryOpen(true)} title="Every log you have converted or imported">
           Library{library.length > 0 && <span className="count">{library.length}</span>}
         </button>
+        {hasLogs && (
+          <button className="btn" onClick={() => setViewsOpen(true)} title="Save what you have set up, or open a saved view">
+            Views
+          </button>
+        )}
         {lanes.length > 0 && (
           <button className="btn" onClick={openReports} title="Open a printable report of the plotted channels">
             Report
@@ -201,6 +208,7 @@ export default function App() {
       <LogDrawer />
       <ConvertDialog />
       <Library />
+      <Views />
 
       {message && (
         <div className={`toast ${message.kind}`} role={message.kind === "error" ? "alert" : "status"}>

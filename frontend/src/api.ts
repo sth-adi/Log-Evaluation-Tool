@@ -1,4 +1,4 @@
-import type { ConvertJob, ConvertStatus, LibraryEntry, Source } from "./store";
+import type { ConvertJob, ConvertStatus, LibraryEntry, SavedView, Source, ViewPayload } from "./store";
 
 async function parse<T>(r: Response): Promise<T> {
   if (!r.ok) {
@@ -57,6 +57,17 @@ export type LapView = {
   units: Record<string, string>;
   laps: { n: number; duration_s: number; channels: Record<string, (number | null)[]>; delta_s?: (number | null)[] }[];
 };
+export type LapCompare = {
+  axis: "distance" | "time";
+  x: number[];
+  reference: number;
+  reference_log: string;
+  best: { log: string; n: number };
+  units: Record<string, string>;
+  logs: Record<string, { label: string; started_at: string | null }>;
+  skipped: { id: string; reason: string }[];
+  laps: { log: string; n: number; duration_s: number; channels: Record<string, (number | null)[]>; delta_s?: (number | null)[] }[];
+};
 export type Track = {
   source: "gps" | "course" | "lateral g";
   estimated: boolean;
@@ -80,11 +91,30 @@ const lapQuery = (p: LapParams) => ({
 });
 
 export const api = {
+  views: () => getJson<SavedView[]>("/api/workspaces", {}),
+  saveView: (name: string, payload: ViewPayload) =>
+    fetch("/api/workspaces", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, payload }),
+    }).then((r) => parse<SavedView>(r)),
+  deleteView: (id: string) => fetch(`/api/workspaces/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
+
   laps: (id: string, p: LapParams) => getJson<LapTable>(`/api/sources/${id}/laps`, lapQuery(p)),
 
   lapView: (id: string, p: LapParams, channels: string[], selected: number[], ref: number | null, axis: string) =>
     getJson<LapView>(`/api/sources/${id}/lapview`, {
       ...lapQuery(p),
+      channels: channels.join(","),
+      selected: selected.join(",") || undefined,
+      ref: ref ?? undefined,
+      axis,
+    }),
+
+  lapCompare: (ids: string[], p: LapParams, channels: string[], selected: string[], ref: string | null, axis: string) =>
+    getJson<LapCompare>("/api/lapcompare", {
+      ...lapQuery(p),
+      sources: ids.join(","),
       channels: channels.join(","),
       selected: selected.join(",") || undefined,
       ref: ref ?? undefined,

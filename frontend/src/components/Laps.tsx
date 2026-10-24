@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
-import { api, type LapParams, type LapRow, type LapView, type Track } from "../api";
+import { api, type LapCompare, type LapParams, type LapRow, type LapTable as LapTableData, type Track } from "../api";
 import { useStore, type Source } from "../store";
+import { spansDays, stamp } from "../time";
 import { Chart, axis, useFetched } from "./Analysis";
 import { formatValue } from "./Lane";
 
 const LAP_COLOURS = ["#38c8f0", "#ffb020", "#3ddc84", "#b79bff", "#ff8fb1", "#e8e8e8", "#7fa6ff", "#d6e34a"];
 const REF_COLOUR = "#ff3b47";
 const RAMP = ["#2f6df0", "#38c8f0", "#3ddc84", "#ffb020", "#ff3b47"];
-
-const lapColour = (n: number, isRef: boolean) => (isRef ? REF_COLOUR : LAP_COLOURS[n % LAP_COLOURS.length]);
+const ALL = "__all__";
 
 /** 1:12.345 */
 export function fmtLap(s: number): string {
@@ -27,55 +27,99 @@ const METHODS: { id: LapParams["method"]; label: string; help: string }[] = [
   { id: "manual", label: "Times I enter", help: "Type the times, in seconds, that you crossed the line." },
 ];
 
+type Row = LapRow & { id: string; log: string };
+type Group = { src: Source; table: LapTableData; rows: Row[] };
+
 export function Laps() {
   const sources = useStore((s) => s.sources);
   const [sid, setSid] = useState("");
-  const src = sources.find((x) => x.id === sid) ?? sources[0];
-  // keyed by log, so switching logs starts from clean lap, channel and reference choices
-  return <LapsView key={src.id} src={src} sources={sources} onPick={setSid} />;
+  const single = sources.find((x) => x.id === sid);
+  const all = sources.length > 1 && (sid === ALL || (!single && sid === ""));
+  const srcs = all ? sources : [single ?? sources[0]];
+  // keyed by the choice, so switching logs starts from clean lap, channel and reference choices
+  return <LapsView key={all ? ALL : srcs[0].id} srcs={srcs} sources={sources} choice={all ? ALL : srcs[0].id} onPick={setSid} />;
 }
 
-function LapsView({ src, sources, onPick }: { src: Source; sources: Source[]; onPick: (id: string) => void }) {
+function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: Source[]; choice: string; onPick: (id: string) => void }) {
   const rev = useStore((s) => s.rev);
+  const multi = srcs.length > 1;
+  const withDate = spansDays(srcs);
+  const tag = (s: Source) => (s.started_at ? stamp(s.started_at, withDate) : s.label);
 
-  const [params, setParams] = useState<LapParams>({ method: "auto" });
+  const params = useStore((s) => s.lapParams);
+  const setParams = useStore((s) => s.setLapParams);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [axisKind, setAxisKind] = useState<"distance" | "time">("distance");
+  const axisKind = useStore((s) => s.lapAxis);
+  const setAxisKind = useStore((s) => s.setLapAxis);
   const [picked, setPicked] = useState<string[]>([]);
-  const [sel, setSel] = useState<number[] | null>(null);
-  const [ref, setRef] = useState<number | null>(null);
+  const [sel, setSel] = useState<string[] | null>(null);
+  const [ref, setRef] = useState<string | null>(null);
   const [colourBy, setColourBy] = useState("");
   const [mirror, setMirror] = useState(false);
 
-  const names = useMemo(() => src.channels.map((c) => c.name), [src]);
   const key = JSON.stringify(params);
-  const table = useFetched(() => api.laps(src.id, params), [src.id, key, rev]);
-  const laps = table.data?.laps ?? [];
+  const found = useFetched(async () => {
+    const r = await Promise.all(
+      srcs.map((s) => api.laps(s.id, params).then((t) => ({ s, t }), (e: Error) => ({ s, err: e.message }))),
+    );
+    const groups: Group[] = [];
+    const errors: { label: string; message: string }[] = [];
+    for (const x of r) {
+      if ("t" in x) groups.push({ src: x.s, table: x.t, rows: x.t.laps.map((l) => ({ ...l, id: `${x.s.id}:${l.n}`, log: x.s.id })) });
+      else errors.push({ label: x.s.label, message: x.err });
+    }
+    return { groups, errors };
+  }, [srcs.map((s) => s.id).join(","), key, rev]);
 
+  const groups = useMemo(() => found.data?.groups.filter((g) => g.rows.length) ?? [], [found.data]);
+  const rows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  const noLaps = !!found.data && rows.length === 0;
+  const firstError = found.error ?? found.data?.errors[0]?.message ?? null;
+
+  // the lap everything is compared against: the quickest valid lap across the chosen logs, unless one was clicked
+  const bestRow = useMemo(() => {
+    const pool = rows.filter((r) => r.valid);
+    return (pool.length ? pool : rows).reduce<Row | null>((b, r) => (!b || r.duration_s < b.duration_s ? r : b), null);
+  }, [rows]);
+  const selected = sel ?? rows.filter((r) => r.valid).map((r) => r.id);
+  const refId = ref && rows.some((r) => r.id === ref) ? ref : (bestRow?.id ?? null);
+  const refLog = refId ? refId.slice(0, refId.indexOf(":")) : srcs[0].id;
+  const refGroup = groups.find((g) => g.src.id === refLog) ?? groups[0];
+
+  const names = useMemo(() => [...new Set(groups.flatMap((g) => g.src.channels.map((c) => c.name)))], [groups]);
+  const speed = refGroup?.table.speed_channel ?? null;
   const defaults = useMemo(() => {
     const find = (re: RegExp) => names.find((n) => re.test(n));
-    return [table.data?.speed_channel, find(/^(tps1?|throttle)$/i), find(/^rpm$/i)].filter(Boolean) as string[];
-  }, [names, table.data?.speed_channel]);
+    return [speed, find(/^(tps1?|throttle)$/i), find(/^rpm$/i)].filter(Boolean) as string[];
+  }, [names, speed]);
   const channels = picked.length ? picked : defaults;
-  const hasDistance = !!table.data?.speed_channel;
+  const hasDistance = groups.length > 0 && groups.every((g) => g.table.speed_channel);
   const axisUsed = hasDistance ? axisKind : "time";
-  const selected = sel ?? laps.filter((l) => l.valid).map((l) => l.n);
-  const refN = ref ?? table.data?.best ?? null;
+
+  const colourOf = useMemo(() => {
+    const order = rows.filter((r) => selected.includes(r.id)).map((r) => r.id);
+    return (id: string) => (id === refId ? REF_COLOUR : LAP_COLOURS[Math.max(order.indexOf(id), 0) % LAP_COLOURS.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, selected.join(","), refId]);
 
   const view = useFetched(
-    async () => (laps.length && channels.length ? api.lapView(src.id, params, channels, selected, refN, axisUsed) : null),
-    [src.id, key, channels.join(","), selected.join(","), refN, axisUsed, laps.length, rev],
+    async () =>
+      groups.length && channels.length
+        ? api.lapCompare(groups.map((g) => g.src.id), params, channels, selected, refId, axisUsed)
+        : null,
+    [groups.map((g) => g.src.id).join(","), key, channels.join(","), selected.join(","), refId, axisUsed, rev],
   );
 
-  const colour = colourBy || table.data?.speed_channel || "";
-  const track = useFetched(() => api.track(src.id, params, colour || undefined, mirror), [src.id, key, colour, mirror, rev]);
+  const colour = colourBy || speed || "";
+  const track = useFetched(() => api.track(refLog, params, colour || undefined, mirror), [refLog, key, colour, mirror, rev]);
 
   const apply = (p: LapParams) => {
     setParams(p);
     setSel(null);
     setRef(null);
   };
-  const toggle = (n: number) => setSel((cur) => ((cur ?? selected).includes(n) ? (cur ?? selected).filter((x) => x !== n) : [...(cur ?? selected), n]));
+  const toggle = (id: string) => setSel((cur) => ((cur ?? selected).includes(id) ? (cur ?? selected).filter((x) => x !== id) : [...(cur ?? selected), id]));
+  const lapCount = rows.length;
 
   return (
     <section className="analysis laps" aria-label="Laps">
@@ -83,7 +127,8 @@ function LapsView({ src, sources, onPick }: { src: Source; sources: Source[]; on
         {sources.length > 1 && (
           <label className="inline">
             Log
-            <select value={src.id} onChange={(e) => onPick(e.target.value)}>
+            <select value={choice} onChange={(e) => onPick(e.target.value)}>
+              <option value={ALL}>All logs (compare)</option>
               {sources.map((s) => (
                 <option key={s.id} value={s.id}>{s.label}</option>
               ))}
@@ -98,9 +143,10 @@ function LapsView({ src, sources, onPick }: { src: Source; sources: Source[]; on
             Time in lap
           </button>
         </div>
-        {table.data && (
+        {found.data && !noLaps && (
           <span className="muted small">
-            {laps.length} lap{laps.length === 1 ? "" : "s"} found from {table.data.found_by}.
+            {lapCount} lap{lapCount === 1 ? "" : "s"}
+            {multi ? ` across ${groups.length} log${groups.length === 1 ? "" : "s"}` : ""} found from {groups[0].table.found_by}.
           </span>
         )}
         <div className="spacer" />
@@ -109,37 +155,45 @@ function LapsView({ src, sources, onPick }: { src: Source; sources: Source[]; on
         </button>
       </div>
 
-      {(settingsOpen || (table.error && !table.data)) && <LapSettings names={names} value={params} onApply={apply} error={table.data ? null : table.error} />}
+      {(settingsOpen || noLaps) && <LapSettings names={names.length ? names : srcs.flatMap((s) => s.channels.map((c) => c.name))} value={params} onApply={apply} error={noLaps ? firstError : null} />}
 
       <div className="laps-body">
         <aside className="laps-side">
-          {table.data && <LapTable laps={laps} sel={selected} refN={refN} bestN={table.data.best} onToggle={toggle} onRef={setRef} hasSpeed={hasDistance} />}
-          <TrackCard
-            show={!!table.data || track.data?.source === "gps"}
-            track={track.data}
-            error={track.error}
-            names={names}
-            colour={colour}
-            onColour={setColourBy}
-            mirror={mirror}
-            onMirror={setMirror}
-            src={src}
-          />
+          {groups.length > 0 && (
+            <LapTable groups={groups} sel={selected} refId={refId} bestId={bestRow?.id ?? null} onToggle={toggle} onRef={setRef} hasSpeed={hasDistance} label={tag} multi={multi} colourOf={colourOf} />
+          )}
+          {multi && (found.data?.errors.length ?? 0) > 0 && groups.length > 0 && (
+            <p className="muted small lap-note">No laps in: {found.data!.errors.map((e) => e.label).join(", ")}.</p>
+          )}
+          {refGroup && (
+            <TrackCard
+              show={groups.length > 0 || track.data?.source === "gps"}
+              track={track.data}
+              error={track.error}
+              names={refGroup.src.channels.map((c) => c.name)}
+              colour={colour}
+              onColour={setColourBy}
+              mirror={mirror}
+              onMirror={setMirror}
+              title={multi ? `Track · ${tag(refGroup.src).replace(/:\d\d$/, "")}` : "Track"}
+            />
+          )}
         </aside>
 
         <div className="laps-main">
-          {!table.data && !table.error && <p className="muted pad">Finding laps</p>}
-          {table.error && !table.data && (
+          {!found.data && !found.error && <p className="muted pad">Finding laps</p>}
+          {found.error && <p className="muted pad">{found.error}</p>}
+          {noLaps && (
             <div className="laps-empty">
-              <h2>No laps found in this log</h2>
-              <p>{table.error}</p>
+              <h2>No laps found {multi ? "in these logs" : "in this log"}</h2>
+              <p>{firstError}</p>
               <p className="muted">
                 Dyno and bench runs have no start/finish line, so that is normal for them. Track logs usually carry a lap timer or beacon channel; choose it under
                 "How laps are found".
               </p>
             </div>
           )}
-          {table.data && (
+          {groups.length > 0 && (
             <>
               <div className="chips">
                 {channels.map((c) => (
@@ -148,12 +202,7 @@ function LapsView({ src, sources, onPick }: { src: Source; sources: Source[]; on
                   </button>
                 ))}
                 {channels.length < 6 && (
-                  <select
-                    className="chip-add"
-                    value=""
-                    aria-label="Add a channel to the overlay"
-                    onChange={(e) => e.target.value && setPicked([...channels, e.target.value])}
-                  >
+                  <select className="chip-add" value="" aria-label="Add a channel to the overlay" onChange={(e) => e.target.value && setPicked([...channels, e.target.value])}>
                     <option value="">Add channel</option>
                     {names.filter((n) => !channels.includes(n)).map((n) => (
                       <option key={n} value={n}>{n}</option>
@@ -162,7 +211,7 @@ function LapsView({ src, sources, onPick }: { src: Source; sources: Source[]; on
                 )}
               </div>
               {view.error && <p className="muted pad">{view.error}</p>}
-              {view.data && <Overlay view={view.data} channels={channels} />}
+              {view.data && <Overlay view={view.data} channels={channels} colourOf={colourOf} refId={refId} groups={groups} label={tag} multi={multi} />}
             </>
           )}
         </div>
@@ -231,19 +280,24 @@ function LapSettings(props: { names: string[]; value: LapParams; onApply: (p: La
 }
 
 function LapTable(props: {
-  laps: LapRow[];
-  sel: number[];
-  refN: number | null;
-  bestN: number | null;
+  groups: Group[];
+  sel: string[];
+  refId: string | null;
+  bestId: string | null;
   hasSpeed: boolean;
-  onToggle: (n: number) => void;
-  onRef: (n: number) => void;
+  multi: boolean;
+  label: (s: Source) => string;
+  colourOf: (id: string) => string;
+  onToggle: (id: string) => void;
+  onRef: (id: string) => void;
 }) {
-  const { laps } = props;
-  if (!laps.length) return <p className="muted pad">The start and finish were found, but no complete lap sits between them.</p>;
-  const best = laps.find((l) => l.n === props.bestN);
-  const valid = laps.filter((l) => l.valid);
+  const rows = props.groups.flatMap((g) => g.rows);
+  const best = rows.find((l) => l.id === props.bestId);
+  const valid = rows.filter((l) => l.valid);
   const avg = valid.length ? valid.reduce((a, l) => a + l.duration_s, 0) / valid.length : null;
+  const refRow = rows.find((l) => l.id === props.refId);
+  const refDur = refRow?.duration_s ?? best?.duration_s ?? 0;
+  const cols = props.hasSpeed ? 5 : 4;
   return (
     <div className="lap-table-wrap">
       <div className="lap-summary">
@@ -266,33 +320,14 @@ function LapTable(props: {
             <th scope="col"><span className="sr">Show</span></th>
             <th scope="col">Lap</th>
             <th scope="col" className="num">Time</th>
-            <th scope="col" className="num">Δ best</th>
+            <th scope="col" className="num">{refRow && refRow.id !== props.bestId ? "Δ ref" : "Δ best"}</th>
             {props.hasSpeed && <th scope="col" className="num">Top km/h</th>}
           </tr>
         </thead>
         <tbody>
-          {laps.map((l) => {
-            const on = props.sel.includes(l.n);
-            const isRef = l.n === props.refN;
-            return (
-              <tr key={l.n} className={on ? undefined : "off"}>
-                <td>
-                  <input type="checkbox" checked={on} onChange={() => props.onToggle(l.n)} aria-label={`Show lap ${l.n}`} />
-                </td>
-                <th scope="row">
-                  <button className="lap-name" onClick={() => props.onRef(l.n)} title="Compare the other laps against this one">
-                    <span className="swatch" style={{ background: lapColour(l.n, isRef) }} aria-hidden />
-                    {l.n}
-                  </button>
-                  {l.best && <small className="log-tag best">Best</small>}
-                  {!l.valid && <small className="log-tag">In/out</small>}
-                </th>
-                <td className="num">{fmtLap(l.duration_s)}</td>
-                <td className="num">{l.best ? "–" : fmtDelta(l.delta_best_s)}</td>
-                {props.hasSpeed && <td className="num">{l.max_kmh != null ? l.max_kmh.toFixed(1) : "–"}</td>}
-              </tr>
-            );
-          })}
+          {props.groups.map((g) => (
+            <LapGroup key={g.src.id} g={g} cols={cols} refDur={refDur} {...props} />
+          ))}
         </tbody>
       </table>
       <p className="muted small lap-note">Click a lap number to make it the reference the others are compared against.</p>
@@ -300,29 +335,94 @@ function LapTable(props: {
   );
 }
 
-function Overlay({ view, channels }: { view: LapView; channels: string[] }) {
+function LapGroup(props: Parameters<typeof LapTable>[0] & { g: Group; cols: number; refDur: number }) {
+  const { g } = props;
+  return (
+    <>
+      {props.multi && (
+        <tr className="group">
+          <th colSpan={props.cols} scope="colgroup">
+            {props.label(g.src)} <small>{g.src.label}</small>
+          </th>
+        </tr>
+      )}
+      {g.rows.map((l) => {
+        const on = props.sel.includes(l.id);
+        const isRef = l.id === props.refId;
+        return (
+          <tr key={l.id} className={on ? undefined : "off"}>
+            <td>
+              <input type="checkbox" checked={on} onChange={() => props.onToggle(l.id)} aria-label={`Show lap ${l.n}`} />
+            </td>
+            <th scope="row">
+              <button className="lap-name" onClick={() => props.onRef(l.id)} title="Compare the other laps against this one">
+                <span className="swatch" style={{ background: props.colourOf(l.id) }} aria-hidden />
+                {l.n}
+              </button>
+              {l.id === props.bestId && <small className="log-tag best">Best</small>}
+              {!l.valid && <small className="log-tag">In/out</small>}
+            </th>
+            <td className="num">{fmtLap(l.duration_s)}</td>
+            <td className="num">{isRef ? "–" : fmtDelta(l.duration_s - props.refDur)}</td>
+            {props.hasSpeed && <td className="num">{l.max_kmh != null ? l.max_kmh.toFixed(1) : "–"}</td>}
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+type Line = { id: string; label: string; ys: (number | null)[] };
+
+function Overlay(props: {
+  view: LapCompare;
+  channels: string[];
+  colourOf: (id: string) => string;
+  refId: string | null;
+  groups: Group[];
+  label: (s: Source) => string;
+  multi: boolean;
+}) {
+  const { view } = props;
   const isDist = view.axis === "distance";
   const xLabel = isDist ? "Distance into the lap (m)" : "Time into the lap (s)";
-  const delta = useMemo(
-    () => (isDist ? view.laps.filter((l) => l.delta_s).map((l) => ({ n: l.n, ys: l.delta_s! })) : []),
+  const name = (log: string, n: number) => {
+    const s = props.groups.find((g) => g.src.id === log)?.src;
+    return props.multi && s ? `${props.label(s).replace(/:\d\d$/, "")} L${n}` : `Lap ${n}`;
+  };
+  const delta = useMemo<Line[]>(
+    () => (isDist ? view.laps.filter((l) => l.delta_s).map((l) => ({ id: `${l.log}:${l.n}`, label: name(l.log, l.n), ys: l.delta_s! })) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [view, isDist],
   );
   return (
     <div className="lap-charts">
       {delta.length > 0 && (
-        <LapChart title="Time ahead (−) or behind (+) the reference lap" unit="s" x={view.x} xLabel={xLabel} laps={delta} refN={view.reference} height={210} signed />
+        <LapChart title="Time ahead (−) or behind (+) the reference lap" unit="s" x={view.x} xLabel={xLabel} laps={delta} refId={props.refId} colourOf={props.colourOf} height={210} signed />
       )}
-      {channels.map((c, i) => (
-        <OverlayChannel key={c} view={view} channel={c} xLabel={xLabel} last={i === channels.length - 1} />
+      {props.channels.map((c, i) => (
+        <OverlayChannel key={c} view={view} channel={c} xLabel={xLabel} last={i === props.channels.length - 1} name={name} refId={props.refId} colourOf={props.colourOf} />
       ))}
     </div>
   );
 }
 
-function OverlayChannel(props: { view: LapView; channel: string; xLabel: string; last: boolean }) {
+function OverlayChannel(props: {
+  view: LapCompare;
+  channel: string;
+  xLabel: string;
+  last: boolean;
+  name: (log: string, n: number) => string;
+  refId: string | null;
+  colourOf: (id: string) => string;
+}) {
   const { view, channel } = props;
-  const lines = useMemo(() => view.laps.map((l) => ({ n: l.n, ys: l.channels[channel] ?? [] })), [view, channel]);
-  return <LapChart title={channel} unit={view.units[channel] ?? ""} x={view.x} xLabel={props.xLabel} laps={lines} refN={view.reference} height={240} last={props.last} />;
+  const lines = useMemo<Line[]>(
+    () => view.laps.filter((l) => l.channels[channel]).map((l) => ({ id: `${l.log}:${l.n}`, label: props.name(l.log, l.n), ys: l.channels[channel] })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, channel],
+  );
+  return <LapChart title={channel} unit={view.units[channel] ?? ""} x={view.x} xLabel={props.xLabel} laps={lines} refId={props.refId} colourOf={props.colourOf} height={240} last={props.last} />;
 }
 
 function LapChart(props: {
@@ -330,13 +430,15 @@ function LapChart(props: {
   unit: string;
   x: number[];
   xLabel: string;
-  laps: { n: number; ys: (number | null)[] }[];
-  refN: number;
+  laps: Line[];
+  refId: string | null;
+  colourOf: (id: string) => string;
   height: number;
   signed?: boolean;
   last?: boolean;
 }) {
   const data = useMemo(() => [props.x, ...props.laps.map((l) => l.ys)] as unknown as uPlot.AlignedData, [props.x, props.laps]);
+  const dist = props.xLabel.startsWith("Dist");
   return (
     <div className="lap-chart" style={{ height: props.height }}>
       <h3>
@@ -353,11 +455,11 @@ function LapChart(props: {
           scales: { x: { time: false } },
           axes: [axis(props.last ? props.xLabel : "", { size: props.last ? 44 : 26 }), axis("", { size: 56 })],
           series: [
-            { label: props.xLabel.startsWith("Dist") ? "Distance (m)" : "Time (s)", value: (_u, v) => (v == null ? "–" : v.toFixed(props.xLabel.startsWith("Dist") ? 0 : 1)) },
+            { label: dist ? "Distance (m)" : "Time (s)", value: (_u, v) => (v == null ? "–" : v.toFixed(dist ? 0 : 1)) },
             ...props.laps.map((l) => ({
-              label: `Lap ${l.n}`,
-              stroke: lapColour(l.n, l.n === props.refN),
-              width: l.n === props.refN ? 2.5 : 1.5,
+              label: l.label,
+              stroke: props.colourOf(l.id),
+              width: l.id === props.refId ? 2.5 : 1.5,
               points: { show: false },
               value: (_u: uPlot, v: number | null) => (v == null ? "–" : props.signed ? fmtDelta(v) : formatValue(v)),
             })),
@@ -386,7 +488,7 @@ function TrackCard(props: {
   onColour: (c: string) => void;
   mirror: boolean;
   onMirror: (m: boolean) => void;
-  src: Source;
+  title: string;
 }) {
   if (!props.show) return null;
   const t = props.track;
@@ -394,7 +496,7 @@ function TrackCard(props: {
   return (
     <div className="track-card">
       <div className="track-head">
-        <h3>Track</h3>
+        <h3>{props.title}</h3>
         <label className="inline">
           Colour by
           <select value={props.colour} onChange={(e) => props.onColour(e.target.value)}>
