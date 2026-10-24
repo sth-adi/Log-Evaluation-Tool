@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Analyse } from "./components/Analyse";
+import { CanDialog } from "./components/CanDialog";
 import { ConvertDialog } from "./components/ConvertDialog";
 import { ImportButton, isLogFile } from "./components/ImportButton";
 import { Lane, channelGroups } from "./components/Lane";
@@ -143,7 +144,7 @@ export default function App() {
         ) : !hasLogs ? (
           <div className="empty">
             <h2>Drop your logs here</h2>
-            <p>Life Racing .LRD logs, or CSV, Excel, Parquet and MDF (.mf4) files. Everything stays on this computer.</p>
+            <p>Life Racing .LRD logs, or CSV, Excel, Parquet, MDF (.mf4) and CAN (.asc, .blf) files. Everything stays on this computer.</p>
             <ImportButton className="btn primary lg">Choose files</ImportButton>
             {library.length > 0 && (
               <button className="btn lg" onClick={() => setLibraryOpen(true)}>
@@ -187,11 +188,12 @@ export default function App() {
       <Palette />
       <LogDrawer />
       <ConvertDialog />
+      <CanDialog />
       <Library />
       <Views />
 
       {message && (
-        <div className={`toast ${message.kind}`} role={message.kind === "error" ? "alert" : "status"}>
+        <div className={`toast ${message.kind}`} role={message.kind === "info" ? "status" : "alert"}>
           <span>{message.text}</span>
           <button className="btn ghost sm" onClick={clearMessage}>
             Dismiss

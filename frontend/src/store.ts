@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, type LapParams } from "./api";
+import { api, type Dbc, type LapParams } from "./api";
 import { readJson, writeJson } from "./storage";
 
 export type Channel = {
@@ -102,6 +102,12 @@ type State = {
   recent: string[]; // channels plotted lately, newest first
   addDerivedAll: (name: string, expr: string, unit: string) => Promise<boolean>;
   removeDerivedAll: (name: string) => Promise<void>;
+  canFiles: File[] | null; // CAN logs waiting to be told which DBC file decodes them
+  dbcs: Dbc[];
+  closeCan: () => void;
+  addDbc: (file: File) => Promise<string | null>;
+  deleteDbc: (id: string) => Promise<void>;
+  importCan: (dbcIds: string[]) => Promise<void>;
   metrics: Metric[];
   setMetrics: (m: Metric[]) => void;
   lapParams: LapParams;
@@ -122,9 +128,9 @@ type State = {
   setTool: (t: ToolId | null) => void;
   view: [number, number] | null; // null = full extent
   rev: number; // bumped when data on the server changes (offset edits)
-  message: { kind: "error" | "info"; text: string } | null;
+  message: { kind: "error" | "warn" | "info"; text: string } | null;
   refresh: () => Promise<void>;
-  importFiles: (files: File[]) => Promise<void>;
+  importFiles: (files: File[], dbcIds?: string[]) => Promise<void>;
   setOffset: (id: string, offset: number) => Promise<void>;
   setKind: (id: string, kind: Source["kind"]) => Promise<void>;
   arrange: (mode: "sequential" | "real") => Promise<void>;
@@ -167,7 +173,35 @@ const METRICS_KEY = "let.metrics";
 const isMetric = (m: unknown): m is Metric => !!m && typeof (m as Metric).name === "string" && typeof (m as Metric).expr === "string";
 const loadMetrics = () => readJson<Metric[]>(METRICS_KEY, [], (v): v is Metric[] => Array.isArray(v) && v.every(isMetric));
 
+const isCan = (f: File) => /\.(asc|blf|trc)$/i.test(f.name);
+
 export const useStore = create<State>((set, get) => ({
+  canFiles: null,
+  dbcs: [],
+  closeCan: () => set({ canFiles: null }),
+  addDbc: async (file) => {
+    try {
+      const d = await api.addDbc(file);
+      set({ dbcs: await api.dbcs() });
+      return d.id;
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not use ${file.name}. ${(e as Error).message}` } });
+      return null;
+    }
+  },
+  deleteDbc: async (id) => {
+    try {
+      await api.deleteDbc(id);
+      set({ dbcs: await api.dbcs() });
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not remove the DBC file. ${(e as Error).message}` } });
+    }
+  },
+  importCan: async (dbcIds) => {
+    const files = get().canFiles ?? [];
+    set({ canFiles: null });
+    await get().importFiles(files, dbcIds);
+  },
   metrics: loadMetrics(),
   setMetrics: (metrics) => {
     set({ metrics });
@@ -422,19 +456,31 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  importFiles: async (all) => {
+  importFiles: async (all, dbcIds = []) => {
     const lrd = all.filter((f) => /\.lrd$/i.test(f.name));
-    const files = all.filter((f) => !/\.lrd$/i.test(f.name));
+    const waiting = dbcIds.length === 0 ? all.filter(isCan) : [];
+    const files = all.filter((f) => !/\.lrd$/i.test(f.name) && !waiting.includes(f));
     if (lrd.length) await get().openConvert(lrd);
+    if (waiting.length) {
+      try {
+        set({ dbcs: await api.dbcs() });
+      } catch (e) {
+        set({ message: { kind: "error", text: `Could not load your DBC files. ${(e as Error).message}` } });
+      }
+      set({ canFiles: waiting });
+    }
     for (const f of files) {
       try {
-        const src = await api.importFile(f, guessKind(f.name));
+        const src = await api.importFile(f, guessKind(f.name), dbcIds);
+        const notes = src.reused ? [] : src.warnings;
         set({
           message: {
-            kind: "info",
+            // a guess the importer had to make can change what every plot means, so it stays until dismissed
+            kind: notes.length ? "warn" : "info",
             text: src.reused
               ? `${f.name} was already in your library, so that log was opened instead of copied.`
-              : `Imported ${f.name}: ${src.rows.toLocaleString()} rows, ${src.channels.length} channels.`,
+              : `Imported ${f.name}: ${src.rows.toLocaleString()} rows, ${src.channels.length} channels.` +
+                (notes.length ? ` Check this: ${notes[0]}${notes.length > 1 ? ` (and ${notes.length - 1} more under Manage, Import notes)` : ""}` : ""),
           },
         });
       } catch (e) {

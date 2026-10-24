@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, laps, lifeview, live, pulls, report, store, summary, workspaces
+from . import analysis, can_import, laps, lifeview, live, pulls, report, store, summary, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_any
@@ -45,6 +45,7 @@ async def import_source(
     label: str = Form(""),
     kind: str = Form("other"),
     profile: str = Form(""),
+    dbc: str = Form("", description="comma-separated DBC ids, for CAN logs"),
 ) -> dict:
     if kind not in KINDS:
         raise HTTPException(422, f"kind must be one of {sorted(KINDS)}")
@@ -56,7 +57,10 @@ async def import_source(
     except json.JSONDecodeError as e:
         raise HTTPException(422, f"profile is not valid JSON: {e}") from e
     try:
-        parsed = parse_any(raw, file.filename or "", prof)
+        if Path(file.filename or "").suffix.lower() in can_import.CAN_EXTENSIONS:
+            parsed = can_import.parse_can(raw, file.filename or "", [d for d in dbc.split(",") if d], prof)
+        else:
+            parsed = parse_any(raw, file.filename or "", prof)
     except ImportErrorDetail as e:
         raise HTTPException(422, str(e)) from e
     name = file.filename or "upload.csv"
@@ -75,6 +79,31 @@ def convert_status() -> dict:
     st = lifeview.status()
     st["lifeview_open"] = lifeview.lifeview_running() if st["available"] else False
     return st
+
+
+@app.get("/api/can/dbc")
+def list_dbc() -> list[dict]:
+    return can_import.list_dbc()
+
+
+@app.post("/api/can/dbc")
+async def add_dbc(file: UploadFile = File(...), name: str = Form("")) -> dict:
+    """Keep a DBC file so CAN logs can be decoded now and later."""
+    raw = await file.read()
+    if not raw or len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(422, "The DBC file is empty or too large")
+    try:
+        return can_import.add_dbc(name or Path(file.filename or "").stem, raw)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@app.delete("/api/can/dbc/{dbc_id}", status_code=204)
+def delete_dbc(dbc_id: str) -> None:
+    try:
+        can_import.delete_dbc(dbc_id)
+    except KeyError:
+        raise HTTPException(404, "unknown DBC file") from None
 
 
 @app.post("/api/convert", status_code=202)

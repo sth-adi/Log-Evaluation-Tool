@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { useStore } from "../store";
 
 /** File types the tool can read, as one list for the file picker and the drop area. */
-export const LOG_EXTENSIONS = ["csv", "txt", "tsv", "lrd", "parquet", "xlsx", "mf4", "mdf"];
+export const LOG_EXTENSIONS = ["csv", "txt", "tsv", "lrd", "parquet", "xlsx", "mf4", "mdf", "asc", "blf", "trc"];
 export const ACCEPT = LOG_EXTENSIONS.map((e) => `.${e}`).join(",");
 export const isLogFile = (f: File) => LOG_EXTENSIONS.includes(f.name.split(".").pop()?.toLowerCase() ?? "");
 

@@ -72,8 +72,18 @@ Drop or import any of these. Everything ends up as the same kind of log, so ever
 | `.xlsx` | The first sheet; the first row names the columns, and an optional second row gives units. |
 | `.parquet` | Including the files the tool itself downloads. |
 | `.mf4`, `.mdf`, `.dat` | MDF measurement files, the usual format from CAN loggers and automotive tools. Channels recorded at different rates are put on one time base at the fastest rate (interpolated), and units are kept. |
+| `.asc`, `.blf`, `.trc` | CAN bus logs. A CAN log holds raw frames, so you are asked for the **DBC file** that describes them; it is kept in your library for next time. See below. |
 
 The same file imported twice is recognised and opened rather than stored again.
+
+### CAN logs
+
+Import a `.asc`, `.blf` or `.trc` log and choose the DBC file (add it once, then pick it from the list). Each signal in the DBC becomes a channel with its scaling, unit and, for signals with named values such as gears, state labels.
+
+- Signals arrive at different rates, so they are put on one time base at the fastest message rate (between 2 ms and 1 s), each value held until its next frame. A signal that goes silent for ten of its own periods shows as a gap instead of a flat line.
+- Frames whose id is not in the DBC are counted and reported when you import, with the most common ids, so a wrong or incomplete DBC is obvious. The same goes for frames of the wrong length, and error frames.
+- A log that matches nothing in the DBC is refused, and the message lists the ids it does contain.
+- Decoding uses python-can and cantools. Raw bus logging inside an `.mf4` file is not decoded yet.
 
 ## Summary
 

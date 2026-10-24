@@ -8,6 +8,8 @@ python-multipart>=0.0.9
 pyserial>=3.5
 openpyxl>=3.1  # Excel files
 asammdf>=8.0  # MDF measurement files
+python-can>=4.4  # CAN log files (.asc, .blf, .trc)
+cantools>=39  # DBC files
 
 # only needed to convert .LRD logs through LifeView (Windows)
 pywin32>=306; sys_platform == "win32"

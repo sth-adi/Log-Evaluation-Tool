@@ -112,6 +112,8 @@ export type SummaryData = {
   errors: Record<string, Record<string, string>>;
 };
 
+export type Dbc = { id: string; name: string; messages: number; signals: number };
+
 export type LiveChannel = { name: string; unit: string; last: number | null };
 export type LiveStatus = {
   state: "running" | "stopped";
@@ -167,6 +169,14 @@ const lapQuery = (p: LapParams) => ({
 });
 
 export const api = {
+  dbcs: () => getJson<Dbc[]>("/api/can/dbc", {}),
+  addDbc: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetch("/api/can/dbc", { method: "POST", body: form }).then((r) => parse<Dbc>(r));
+  },
+  deleteDbc: (id: string) => fetch(`/api/can/dbc/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
+
   summary: (ids: string[], metrics: Metric[], t0?: number, t1?: number) =>
     fetch("/api/summary", {
       method: "POST",
@@ -269,10 +279,11 @@ export const api = {
 
   sources: () => fetch("/api/sources").then((r) => parse<Source[]>(r)),
 
-  importFile: (file: File, kind: string) => {
+  importFile: (file: File, kind: string, dbcIds: string[] = []) => {
     const form = new FormData();
     form.append("file", file);
     form.append("kind", kind);
+    if (dbcIds.length) form.append("dbc", dbcIds.join(","));
     return fetch("/api/sources", { method: "POST", body: form }).then((r) => parse<Source>(r));
   },
 

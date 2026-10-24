@@ -791,6 +791,9 @@ label {
 .toast.error {
   border-left: 3px solid var(--cursor);
 }
+.toast.warn {
+  border-left: 3px solid #ffb020;
+}
 .drop-veil {
   position: fixed;
   inset: 12px;
