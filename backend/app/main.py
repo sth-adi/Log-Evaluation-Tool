@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, report, store
+from . import analysis, lifeview, report, store
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_csv
@@ -53,6 +53,55 @@ async def import_source(
         raise HTTPException(422, str(e)) from e
     name = file.filename or "upload.csv"
     return store.create_source(parsed.df, parsed.meta, label or Path(name).stem, kind, name)
+
+
+@app.get("/api/convert/status")
+def convert_status() -> dict:
+    """Can .LRD logs be converted on this machine, and is LifeView already open?"""
+    st = lifeview.status()
+    st["lifeview_open"] = lifeview.lifeview_running() if st["available"] else False
+    return st
+
+
+@app.post("/api/convert", status_code=202)
+async def convert(files: list[UploadFile] = File(...)) -> dict:
+    """Convert .LRD logs with LifeView, then import the CSVs. Returns a job to poll."""
+    st = lifeview.status()
+    if not st["available"]:
+        raise HTTPException(422, st["reason"])
+    if lifeview.lifeview_running():
+        raise HTTPException(409, "LifeView is already open. Close it, then try again.")
+    batch: list[tuple[str, bytes]] = []
+    for f in files:
+        name = Path(f.filename or "").name
+        if not name.lower().endswith(".lrd"):
+            raise HTTPException(422, f"{name or 'A file'} is not a .LRD log.")
+        data = await f.read()
+        if not data or len(data) > lifeview.MAX_LRD_BYTES:
+            raise HTTPException(422, f"{name} is empty or too large.")
+        batch.append((name, data))
+    if not batch:
+        raise HTTPException(422, "Choose at least one .LRD log.")
+    try:
+        return lifeview.start(batch).public()
+    except lifeview.Busy as e:
+        raise HTTPException(409, str(e)) from None
+
+
+@app.get("/api/convert/{job_id}")
+def convert_job(job_id: str) -> dict:
+    try:
+        return lifeview.get(job_id).public()
+    except KeyError:
+        raise HTTPException(404, "unknown conversion") from None
+
+
+@app.post("/api/convert/{job_id}/cancel")
+def convert_cancel(job_id: str) -> dict:
+    try:
+        return lifeview.cancel(job_id).public()
+    except KeyError:
+        raise HTTPException(404, "unknown conversion") from None
 
 
 @app.get("/api/sources")

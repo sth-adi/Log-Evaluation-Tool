@@ -1,4 +1,4 @@
-import type { Source } from "./store";
+import type { ConvertJob, ConvertStatus, Source } from "./store";
 
 async function parse<T>(r: Response): Promise<T> {
   if (!r.ok) {
@@ -103,6 +103,19 @@ export const api = {
       `/api/sources/${id}/events`,
       {},
     ),
+
+  convertStatus: () => getJson<ConvertStatus>("/api/convert/status", {}),
+
+  convert: (files: File[]) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f);
+    return fetch("/api/convert", { method: "POST", body: form }).then((r) => parse<ConvertJob>(r));
+  },
+
+  convertJob: (id: string) => getJson<ConvertJob>(`/api/convert/${id}`, {}),
+
+  convertCancel: (id: string) =>
+    fetch(`/api/convert/${id}/cancel`, { method: "POST" }).then((r) => parse<ConvertJob>(r)),
 
   remove: (id: string) => fetch(`/api/sources/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
 

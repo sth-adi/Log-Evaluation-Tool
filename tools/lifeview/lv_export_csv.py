@@ -166,9 +166,10 @@ def export(outname):
     msg_click(children(rate, 'LRButton')[0])              # OK
 
 
-def main(force=None, outname=None):
+def main(force=None, outname=None, log=None):
+    """Export the log open in LifeView. Pass ``log`` (its .LRD path) to skip reading it from the title."""
     force = ('--force' in sys.argv) if force is None else force
-    log = current_log()
+    log = log or current_log()
     if not log:
         sys.exit('no .LRD open in LifeView')
     folder = os.path.dirname(log)

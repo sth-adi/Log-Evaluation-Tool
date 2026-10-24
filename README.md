@@ -14,6 +14,15 @@ The channel names in `samples/synthetic` are invented and are not the real F88R 
 
 The backend has automated tests. The Windows scripts and the browser UI have not yet been run on a real Windows machine, so expect to fix small things on first use.
 
+## Open it
+
+Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desktop). It starts the tool, waits until it is ready and opens http://127.0.0.1:8000 in your browser. If it is already running it just opens the page. A minimised window stays in the taskbar while the tool runs; close that window to stop it. Binds to 127.0.0.1 only, so nothing is visible on the network.
+
+## Getting logs in
+
+- **CSV files** exported from LifeView: choose them with **Import logs**, or drop them on the window.
+- **Life Racing `.LRD` logs**: choose or drop them the same way. The tool opens each one in LifeView, exports the CSV and imports it, then lays the logs out in start-time order. This needs Windows with LifeView installed and no LifeView window already open, and it takes over the mouse for a few seconds per log (about 10 seconds each), so keep your hands off while it runs. CSV copies are kept in `data/exports`. Machines without LifeView can still import those CSV files. The tool never reads or decrypts `.LRD` files itself; it operates LifeView's own export. See `tools/lifeview/README.md`.
+
 ## Run it on Windows
 
 Needs Python 3.10+ and, for the first build, Node.js 20+.

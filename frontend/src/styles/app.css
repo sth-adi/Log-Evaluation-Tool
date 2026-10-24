@@ -932,3 +932,99 @@ label {
     display: none;
   }
 }
+
+/* ---- convert dialog ---------------------------------------------------- */
+
+.dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.6);
+  overflow: auto;
+}
+.dialog h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.dialog header p {
+  margin-top: 4px;
+  font-size: var(--t13);
+}
+.dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.callout {
+  padding: 12px 14px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--cursor);
+  border-radius: var(--r-sm);
+  font-size: var(--t13);
+}
+.callout.warn {
+  border-left-color: var(--ice);
+}
+.convert-list {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: auto;
+}
+.convert-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.convert-list li:last-child {
+  border-bottom: 0;
+}
+.c-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.c-state {
+  color: var(--muted);
+  font-size: var(--t13);
+}
+.convert-list li.working .c-state {
+  color: var(--text);
+}
+.convert-list li.done .c-state::before {
+  content: "\2713  ";
+}
+.convert-list li.failed .c-state {
+  color: #ff8a92;
+}
+.c-err {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: var(--t13);
+}
+.meter {
+  height: 4px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--text);
+  transition: width var(--dur) var(--ease);
+}
+.summary {
+  color: var(--muted);
+  font-size: var(--t13);
+}

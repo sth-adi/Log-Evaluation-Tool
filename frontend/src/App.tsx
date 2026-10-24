@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Analysis } from "./components/Analysis";
+import { ConvertDialog } from "./components/ConvertDialog";
 import { Lane, channelGroups } from "./components/Lane";
 import { LogDrawer, LogRail } from "./components/LogRail";
 import { Palette } from "./components/Palette";
@@ -68,7 +69,7 @@ export default function App() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
-      const files = [...e.dataTransfer.files].filter((f) => /\.(csv|txt|tsv)$/i.test(f.name));
+      const files = [...e.dataTransfer.files].filter((f) => /\.(csv|txt|tsv|lrd)$/i.test(f.name));
       if (files.length) void importFiles(files);
     },
     [importFiles],
@@ -122,7 +123,7 @@ export default function App() {
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.txt,.tsv"
+          accept=".csv,.txt,.tsv,.lrd"
           multiple
           hidden
           onChange={(e) => {
@@ -139,7 +140,7 @@ export default function App() {
         {!hasLogs ? (
           <div className="empty">
             <h2>Drop your logs here</h2>
-            <p>CSV files exported from LifeView. They stay on this computer.</p>
+            <p>Life Racing .LRD logs, or CSV files exported from LifeView. Everything stays on this computer.</p>
             <button className="btn primary lg" onClick={() => fileRef.current?.click()}>
               Choose files
             </button>
@@ -179,6 +180,7 @@ export default function App() {
 
       <Palette />
       <LogDrawer />
+      <ConvertDialog />
 
       {message && (
         <div className={`toast ${message.kind}`} role={message.kind === "error" ? "alert" : "status"}>

@@ -28,6 +28,17 @@ export type Source = {
   rules?: Rule[];
 };
 
+export type ConvertStatus = { available: boolean; reason: string; lifeview_open: boolean };
+export type ConvertItem = { name: string; state: string; stage: string; error: string; source_id: string; csv: string };
+export type ConvertJob = { id: string; state: "running" | "done" | "cancelled"; items: ConvertItem[]; imported: number };
+export type ConvertView = {
+  phase: "ready" | "running" | "finished";
+  files: File[];
+  status?: ConvertStatus;
+  job?: ConvertJob;
+  error?: string;
+};
+
 export type Rule = { name: string; expr: string; min_duration_s: number; merge_gap_s: number };
 
 export type LaneSeries = { sourceId: string; channel: string };
@@ -36,6 +47,11 @@ export type Lane = { id: number; series: LaneSeries[] };
 type State = {
   sources: Source[];
   lanes: Lane[];
+  convert: ConvertView | null;
+  openConvert: (files: File[]) => Promise<void>;
+  startConvert: () => Promise<void>;
+  cancelConvert: () => Promise<void>;
+  closeConvert: () => void;
   paletteOpen: boolean;
   setPalette: (open: boolean) => void;
   managing: string | null; // id of the log whose drawer is open
@@ -91,6 +107,43 @@ export const useStore = create<State>((set, get) => ({
   view: null,
   mode: "plots",
   setMode: (mode) => set({ mode }),
+  convert: null,
+
+  openConvert: async (files) => {
+    try {
+      const status = await api.convertStatus();
+      set({ convert: { phase: "ready", files, status } });
+    } catch (e) {
+      set({ convert: { phase: "ready", files, error: `Could not reach the backend. ${(e as Error).message}` } });
+    }
+  },
+
+  startConvert: async () => {
+    const c = get().convert;
+    if (!c) return;
+    try {
+      let job = await api.convert(c.files);
+      set({ convert: { ...c, phase: "running", job, error: undefined } });
+      while (job.state === "running") {
+        await new Promise((r) => setTimeout(r, 700));
+        job = await api.convertJob(job.id);
+        set((s) => (s.convert ? { convert: { ...s.convert, job } } : s));
+      }
+      await get().refresh();
+      if (get().sources.length > 1 && job.imported > 0) await get().arrange("sequential");
+      set((s) => (s.convert ? { convert: { ...s.convert, phase: "finished", job } } : s));
+    } catch (e) {
+      set((s) => (s.convert ? { convert: { ...s.convert, phase: "ready", error: (e as Error).message } } : s));
+    }
+  },
+
+  cancelConvert: async () => {
+    const job = get().convert?.job;
+    if (job) await api.convertCancel(job.id).catch(() => undefined);
+  },
+
+  closeConvert: () => set({ convert: null }),
+
   paletteOpen: false,
   setPalette: (paletteOpen) => set({ paletteOpen }),
   managing: null,
@@ -150,7 +203,10 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  importFiles: async (files) => {
+  importFiles: async (all) => {
+    const lrd = all.filter((f) => /\.lrd$/i.test(f.name));
+    const files = all.filter((f) => !/\.lrd$/i.test(f.name));
+    if (lrd.length) await get().openConvert(lrd);
     for (const f of files) {
       try {
         const src = await api.importFile(f, guessKind(f.name));
