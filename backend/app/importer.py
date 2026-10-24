@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -238,6 +239,20 @@ def parse_csv(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
         units = {c: u for c, u in zip(df.columns, raw_units)}
         assumptions.append("second row treated as units")
 
+    return _build(df, units, assumptions, warnings, profile, content_sha(raw), preamble, filename)
+
+
+def _build(
+    df: pd.DataFrame,
+    units: dict[str, str],
+    assumptions: list[str],
+    warnings: list[str],
+    profile: dict,
+    sha: str,
+    preamble: str,
+    filename: str,
+) -> ParsedLog:
+    """Everything after the file has become a table: state channels, the time column, units, metadata."""
     # numeric coercion; short text columns (OFF/ON, run modes) become state channels
     dropped_text: list[str] = []
     states: dict[str, dict[str, str]] = {}
@@ -356,7 +371,7 @@ def parse_csv(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
 
     inv_rename = {v: k for k, v in rename.items()}
     meta = {
-        "content_sha": content_sha(raw),
+        "content_sha": sha,
         "started_at": find_start_time(preamble, filename),
         "rows": int(len(out)),
         "channels": [
@@ -380,3 +395,118 @@ def parse_csv(raw: bytes, profile: dict | None = None, filename: str = "") -> Pa
         "warnings": warnings,
     }
     return ParsedLog(out, meta)
+
+
+# --- other file formats ----------------------------------------------------------------------------
+
+TABLE_EXTENSIONS = {".parquet", ".xlsx", ".mf4", ".mdf", ".dat"}
+
+
+def _raw_sha(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def parse_parquet(raw: bytes, profile: dict | None = None, filename: str = "") -> ParsedLog:
+    try:
+        df = pd.read_parquet(io.BytesIO(raw))
+    except Exception as e:  # pyarrow raises several types
+        raise ImportErrorDetail(f"Could not read the file as Parquet: {e}") from e
+    df = df.reset_index(drop=True) if isinstance(df.index, pd.RangeIndex) else df.reset_index()
+    df.columns = [_clean_name(c) for c in df.columns]
+    return _build(df, {}, ["read as a Parquet table"], [], profile or {}, _raw_sha(raw), "", filename)
+
+
+def parse_xlsx(raw: bytes, profile: dict | None = None, filename: str = "") -> ParsedLog:
+    """The first sheet, whose first row names the columns (a second row of units is detected as in CSV)."""
+    try:
+        sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None, header=None, engine="openpyxl")
+    except Exception as e:
+        raise ImportErrorDetail(f"Could not read the file as an Excel workbook: {e}") from e
+    if not sheets:
+        raise ImportErrorDetail("The workbook has no sheets")
+    name, sheet = next(iter(sheets.items()))
+    sheet = sheet.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
+    if sheet.shape[0] < 3 or sheet.shape[1] < 2:
+        raise ImportErrorDetail("The first sheet needs a header row, a time column and at least one channel")
+    header = [str(c) for c in sheet.iloc[0]]
+    body = sheet.iloc[1:].reset_index(drop=True)
+    units: dict[str, str] = {}
+    first = [str(x) for x in body.iloc[0]]
+    nonnum = sum(1 for c in first if c.strip() and c != "nan" and not _is_number(c))
+    if nonnum >= max(2, len(first) // 2):  # a row of units under the header
+        units = {_clean_name(h): ("" if u == "nan" else u.strip()) for h, u in zip(header, first)}
+        body = body.iloc[1:].reset_index(drop=True)
+    body.columns = [_clean_name(h) for h in header]
+    for c in body.columns:  # cells arrive as text when a unit row sat above them; numbers stay numbers, real text is left for the state-channel logic
+        if body[c].dtype == object:
+            conv = pd.to_numeric(body[c], errors="coerce")
+            if conv.notna().sum() >= 0.9 * body[c].notna().sum():
+                body[c] = conv
+    return _build(body, units, [f"read sheet '{name}' of an Excel workbook"], [], profile or {}, _raw_sha(raw), "", filename)
+
+
+def parse_mdf(raw: bytes, profile: dict | None = None, filename: str = "") -> ParsedLog:
+    """An MDF3/MDF4 measurement file. Channels recorded at different rates are put on one common time base."""
+    try:
+        from asammdf import MDF
+    except ImportError as e:
+        raise ImportErrorDetail("Reading MDF files needs asammdf. Install it with: pip install asammdf") from e
+    import tempfile
+
+    profile = profile or {}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "in.mf4")
+        with open(path, "wb") as f:
+            f.write(raw)
+        try:
+            mdf = MDF(path)
+        except Exception as e:
+            raise ImportErrorDetail(f"Could not read the file as an MDF measurement: {e}") from e
+        try:
+            names = [n for n in mdf.channels_db if n not in ("time", "t") and not n.startswith("$")]
+            if not names:
+                raise ImportErrorDetail("The measurement file has no channels")
+            raster = float(profile.get("raster_s") or 0) or _common_raster(mdf, names)
+            df = mdf.to_dataframe(channels=names, raster=raster, time_from_zero=True, use_interpolation=True)
+            units = {}
+            for n in df.columns:
+                try:
+                    units[str(n)] = mdf.get(n).unit or ""
+                except Exception:
+                    units[str(n)] = ""
+        finally:
+            mdf.close()
+    df.insert(0, "time_s", df.index.to_numpy(dtype=float))
+    df = df.reset_index(drop=True)
+    clean = {c: _clean_name(c) for c in df.columns}
+    df.columns = list(clean.values())
+    units = {clean[c]: u for c, u in units.items() if c in clean}
+    note = f"read an MDF measurement, resampled to one time base every {raster:g} s"
+    return _build(df, units, [note], [], {**profile, "time_column": "time_s", "time_unit": "s"}, _raw_sha(raw), "", filename)
+
+
+def _common_raster(mdf, names: list[str]) -> float:
+    """The shortest spacing between samples of any channel, bounded so a file does not explode in size."""
+    best = None
+    for n in names[:200]:
+        try:
+            ts = mdf.get(n).timestamps
+        except Exception:
+            continue
+        if len(ts) > 2:
+            dt = float(np.median(np.diff(ts)))
+            if dt > 0:
+                best = dt if best is None else min(best, dt)
+    return min(max(best or 0.01, 0.001), 1.0)
+
+
+def parse_any(raw: bytes, filename: str, profile: dict | None = None) -> ParsedLog:
+    """Pick the reader from the file name; anything unknown is treated as delimited text."""
+    ext = os.path.splitext(filename.lower())[1]
+    if ext == ".parquet":
+        return parse_parquet(raw, profile, filename)
+    if ext == ".xlsx":
+        return parse_xlsx(raw, profile, filename)
+    if ext in (".mf4", ".mdf", ".dat"):
+        return parse_mdf(raw, profile, filename)
+    return parse_csv(raw, profile, filename)

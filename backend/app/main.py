@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from . import analysis, laps, lifeview, live, pulls, report, store, summary, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
-from .importer import ImportErrorDetail, parse_csv
+from .importer import ImportErrorDetail, parse_any
 
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 KINDS = {"ecu", "hcu", "other"}
@@ -56,7 +56,7 @@ async def import_source(
     except json.JSONDecodeError as e:
         raise HTTPException(422, f"profile is not valid JSON: {e}") from e
     try:
-        parsed = parse_csv(raw, prof, file.filename or "")
+        parsed = parse_any(raw, file.filename or "", prof)
     except ImportErrorDetail as e:
         raise HTTPException(422, str(e)) from e
     name = file.filename or "upload.csv"

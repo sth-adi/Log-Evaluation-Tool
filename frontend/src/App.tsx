@@ -79,7 +79,7 @@ export default function App() {
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragging(false);
-      const files = [...e.dataTransfer.files].filter((f) => /\.(csv|txt|tsv|lrd)$/i.test(f.name));
+      const files = [...e.dataTransfer.files].filter((f) => /\.(csv|txt|tsv|lrd|parquet|xlsx|mf4|mdf)$/i.test(f.name));
       if (files.length) void importFiles(files);
     },
     [importFiles],
@@ -152,7 +152,7 @@ export default function App() {
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.txt,.tsv,.lrd"
+          accept=".csv,.txt,.tsv,.lrd,.parquet,.xlsx,.mf4,.mdf"
           multiple
           hidden
           onChange={(e) => {
@@ -171,7 +171,7 @@ export default function App() {
         ) : !hasLogs ? (
           <div className="empty">
             <h2>Drop your logs here</h2>
-            <p>Life Racing .LRD logs, or CSV files exported from LifeView. Everything stays on this computer.</p>
+            <p>Life Racing .LRD logs, or CSV, Excel, Parquet and MDF (.mf4) files. Everything stays on this computer.</p>
             <button className="btn primary lg" onClick={() => fileRef.current?.click()}>
               Choose files
             </button>

@@ -57,6 +57,20 @@ Dyno and bench logs have no start/finish line, so the tab says so instead of gue
 - **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
 - **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 
+## File formats
+
+Drop or import any of these. Everything ends up as the same kind of log, so every tab works on all of them.
+
+| Format | Notes |
+| --- | --- |
+| `.LRD` (Life Racing) | Converted through LifeView's own CSV export, see Getting logs in. |
+| `.csv`, `.txt`, `.tsv` | Delimiter, header, units row, millisecond time and `####` gaps are detected. |
+| `.xlsx` | The first sheet; the first row names the columns, and an optional second row gives units. |
+| `.parquet` | Including the files the tool itself downloads. |
+| `.mf4`, `.mdf`, `.dat` | MDF measurement files, the usual format from CAN loggers and automotive tools. Channels recorded at different rates are put on one time base at the fastest rate (interpolated), and units are kept. |
+
+The same file imported twice is recognised and opened rather than stored again.
+
 ## Summary
 
 Analysis > **Summary** gives one row per log and one column per metric, so runs can be compared at a glance. A metric is a channel, an aggregate (highest, lowest, average, median, 95th percentile, spread, first, last, total, or seconds), and an optional **only when** condition written with channel names, for example average `lam1` only when `tps1 > 90`.

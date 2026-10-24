@@ -6,6 +6,8 @@ pandas>=2.2
 pyarrow>=15
 python-multipart>=0.0.9
 pyserial>=3.5
+openpyxl>=3.1  # Excel files
+asammdf>=8.0  # MDF measurement files
 
 # only needed to convert .LRD logs through LifeView (Windows)
 pywin32>=306; sys_platform == "win32"
