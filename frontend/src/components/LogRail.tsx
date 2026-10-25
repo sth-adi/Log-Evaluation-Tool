@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { extentOf, useStore, type Source } from "../store";
+import { presetsFor } from "../presets";
 import { dayLabel } from "../time";
 
 /** "2025-11-19 11-53-32 plus 0h00m00s F88#12357 Dyno run final ALL" -> "F88#12357 Dyno run final" */
@@ -210,6 +211,28 @@ export function LogDrawer() {
             </ul>
           )}
           <div className="calc-form">
+            {presetsFor(src).length > 0 && (
+              <label>
+                Start from a template
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const p = presetsFor(src)[Number(e.target.value)];
+                    if (!p) return;
+                    setName(p.name);
+                    setUnit(p.unit);
+                    setExpr(p.expr);
+                  }}
+                >
+                  <option value="">Choose…</option>
+                  {presetsFor(src).map((p, i) => (
+                    <option key={p.name} value={i}>
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="row">
               <label>
                 Name
