@@ -248,6 +248,15 @@ kbd {
   background: var(--red);
   color: #fff;
 }
+.seg.sm {
+  padding: 2px;
+  border-radius: 8px;
+}
+.seg.sm button {
+  height: 22px;
+  padding: 0 9px;
+  font-size: var(--t12);
+}
 .seg.stretch {
   display: flex;
 }
