@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .rates import update_points
+
 MAX_FFT_POINTS = 1 << 19
 MAX_SCATTER_POINTS = 4000
 
@@ -71,12 +73,21 @@ def spectrum(t: np.ndarray, y: np.ndarray, out_points: int = 1500) -> dict:
     if n > MAX_FFT_POINTS:
         raise ValueError("Window too long for a spectrum; zoom in first")
     grid = t[0] + dt * np.arange(n)
-    u = np.interp(grid, t, y)
+    held = update_points(y)
+    if held is None:
+        native_hz = None
+        u = np.interp(grid, t, y)
+    else:  # a channel read slower than the log's rate: use its real readings, and nothing above half its rate
+        native_hz = 1.0 / dt / held[1]
+        u = np.interp(grid, t[held[0]], y[held[0]])
     u = u - u.mean()
     w = np.hanning(n)
     amp = 2.0 * np.abs(np.fft.rfft(u * w)) / w.sum()
     freq = np.fft.rfftfreq(n, dt)
     freq, amp = freq[1:], amp[1:]  # drop DC
+    if native_hz is not None:
+        keep = freq <= native_hz / 2.0
+        freq, amp = freq[keep], amp[keep]
     peaks = []
     if amp.size >= 3:
         loc = np.where((amp[1:-1] > amp[:-2]) & (amp[1:-1] >= amp[2:]))[0] + 1
@@ -92,6 +103,7 @@ def spectrum(t: np.ndarray, y: np.ndarray, out_points: int = 1500) -> dict:
         "amplitude": amp.tolist(),
         "peaks": peaks,
         "sample_rate_hz": 1.0 / dt,
+        "native_hz": native_hz,
         "samples": n,
     }
 

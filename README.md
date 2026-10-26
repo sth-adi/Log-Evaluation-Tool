@@ -59,6 +59,7 @@ Dyno and bench logs have no start/finish line, so the tool says so instead of gu
 ## Views and downloads
 
 - **Views** (top bar) saves the plots, tab and lap settings under a name. A view stores channel names, not logs, so it works on whichever logs are open. **Export** writes it to a small `.letview.json` file you can send to a teammate; **Open a view file** loads one.
+- **Channels read at different rates.** A log has one row per sample, but each channel is only measured as often as its sensor reports (on the F88 logs rpm about 125 times a second, throttle 50, coolant and speed 25, against 250 rows a second). The file repeats a slow channel's last value until the next reading. The tool estimates each channel's real rate from when its value changes (hover a channel in the search list to see it), then `deriv()` follows the line through the real readings instead of the steps, and the spectrum stops at half the channel's real rate. The estimate is approximate: a channel that is simply steady cannot be told from a slow one, so it is left alone.
 - **Calculated channels** (Manage on any log): write a formula over your channels, or pick a template (acceleration, distance, RPM rise rate, air-fuel ratio and so on). Only templates whose channels exist in that log are offered, and the formula fills in so you can adjust it before adding.
 - **Download the data** (Manage on any log): the whole log, or just the plotted channels in the zoomed window, as CSV or Parquet. Calculated channels are included and time starts at zero.
 

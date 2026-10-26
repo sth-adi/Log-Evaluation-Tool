@@ -10,6 +10,7 @@ export type Channel = {
   states?: Record<string, string>; // text channels: value (index) to label
   derived?: boolean; // a math channel
   expr?: string;
+  native_hz?: number; // estimated readings per second, when slower than the log's sample rate
 };
 
 export type Source = {

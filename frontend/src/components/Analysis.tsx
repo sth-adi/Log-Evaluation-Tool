@@ -234,7 +234,11 @@ function SpectrumChart({ k, t0, t1, rev }: { k: string; t0?: number; t1?: number
   return (
     <Chart
       data={plot}
-      note={`Sampled at ${data!.sample_rate_hz.toFixed(1)} Hz, ${data!.samples.toLocaleString()} samples. Strongest peaks: ${peaks || "none"}.`}
+      note={`${
+        data!.native_hz
+          ? `This channel is only read about ${data!.native_hz.toFixed(0)} times a second, so nothing above ${(data!.native_hz / 2).toFixed(1)} Hz is shown.`
+          : `Sampled at ${data!.sample_rate_hz.toFixed(1)} Hz.`
+      } ${data!.samples.toLocaleString()} samples. Strongest peaks: ${peaks || "none"}.`}
       build={(w, h) => ({
         width: w, height: h, legend: { show: false }, cursor: { drag: { x: true, y: false } },
         scales: { x: { time: false, distr: 3 }, y: { range: (_u, _mn, mx) => [0, mx * 1.08 || 1] } }, // log frequency: engine signals live at low Hz

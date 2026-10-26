@@ -334,6 +334,7 @@ export const api = {
       amplitude: number[];
       peaks: { freq_hz: number; amplitude: number }[];
       sample_rate_hz: number;
+      native_hz: number | null;
       samples: number;
     }>(`/api/sources/${id}/spectrum`, { channel, t0, t1 }),
 

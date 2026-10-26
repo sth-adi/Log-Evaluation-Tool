@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 
-type Entry = { name: string; unit: string; min: number; max: number; logs: number; group: string; derived: boolean };
+type Entry = { name: string; unit: string; min: number; max: number; logs: number; group: string; derived: boolean; hz?: number };
 
 const GROUPS: [string, RegExp][] = [
   ["Temperatures", /(^|[^a-z])(ect|act|iat|egt|eot|clt|oilt)|temp/i],
@@ -38,7 +38,7 @@ export function Palette() {
           e.logs += 1;
           e.min = Math.min(e.min, c.min);
           e.max = Math.max(e.max, c.max);
-        } else m.set(c.name, { name: c.name, unit: c.unit, min: c.min, max: c.max, logs: 1, group: groupOf(c.name), derived: !!c.derived });
+        } else m.set(c.name, { name: c.name, unit: c.unit, min: c.min, max: c.max, logs: 1, group: groupOf(c.name), derived: !!c.derived, hz: c.native_hz });
       }
     return m;
   }, [sources]);
@@ -171,7 +171,7 @@ export function Palette() {
               >
                 <span className="r-name">{e.derived ? `ƒ ${e.name}` : e.name}</span>
                 <span className="r-group">{e.group}</span>
-                <span className="r-range">
+                <span className="r-range" title={e.hz ? `Read about ${e.hz} times a second` : undefined}>
                   {fmt(e.min)} to {fmt(e.max)} {e.unit}
                 </span>
                 {sources.length > 1 && e.logs < sources.length && <span className="r-logs">{e.logs} of {sources.length} logs</span>}

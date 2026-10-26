@@ -29,6 +29,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
+from .rates import native_rate_hz
+
 TIME_NAME_RE = re.compile(r"^(time|timestamp|t|elapsed|seconds|secs|sec)([\s_\-\(\[]|$)", re.I)
 
 UNIT_SUFFIXES = {
@@ -370,6 +372,15 @@ def _build(
     if gaps:
         warnings.append(f"{gaps} gap(s) longer than 5x the median sample spacing (kept as gaps)")
 
+    raster_hz = 1.0 / med_dt if med_dt > 0 else 0.0
+    native = {c: native_rate_hz(out[c].to_numpy(), raster_hz) for c in out.columns if c != "time_s"}
+    held = sum(1 for r in native.values() if r)
+    if held:
+        assumptions.append(
+            f"{held} channel(s) update slower than the log's {raster_hz:g} Hz and are held between readings "
+            "(rates estimated from when the values change); derivatives and spectra use the real readings"
+        )
+
     inv_rename = {v: k for k, v in rename.items()}
     meta = {
         "content_sha": sha,
@@ -382,6 +393,7 @@ def _build(
                 "min": float(np.nanmin(out[c])),
                 "max": float(np.nanmax(out[c])),
                 **({"states": states[inv_rename.get(c, c)]} if inv_rename.get(c, c) in states else {}),
+                **({"native_hz": native[c]} if native[c] else {}),
             }
             for c in out.columns
             if c != "time_s"

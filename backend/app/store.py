@@ -19,12 +19,14 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow
 
 log = logging.getLogger(__name__)
 
 from . import derived as derived_mod
 from . import events as events_mod
 from .downsample import minmax_downsample
+from .rates import native_rate_hz
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,8 +76,37 @@ def get_source(source_id: str) -> dict:
     return json.loads((_folder(source_id) / "meta.json").read_text(encoding="utf-8"))
 
 
+_rates_done: set[str] = set()
+
+
+def _backfill_rates() -> None:
+    """Estimate each channel's real update rate for logs imported before that was recorded."""
+    d = str(data_dir())
+    if d in _rates_done:
+        return
+    _rates_done.add(d)
+    for rec in list_sources(include_closed=True):
+        if rec.get("rates_checked"):
+            continue
+        base = [c["name"] for c in rec["channels"] if not c.get("derived")]
+        try:
+            df = pd.read_parquet(_folder(rec["id"]) / "data.parquet", columns=["time_s", *base])
+        except (OSError, ValueError, pyarrow.ArrowException) as e:  # the log stays usable without rates
+            log.warning("could not estimate update rates for %s: %s", rec["id"], e)
+            continue
+        dt = float(np.median(np.diff(df["time_s"].to_numpy()))) if len(df) > 1 else 0.0
+        raster = 1.0 / dt if dt > 0 else 0.0
+        channels = []
+        for c in rec["channels"]:
+            c = {k: v for k, v in c.items() if k != "native_hz"}
+            r = None if c.get("derived") else native_rate_hz(df[c["name"]].to_numpy(dtype=float), raster)
+            channels.append({**c, **({"native_hz": r} if r else {})})
+        update_source(rec["id"], channels=channels, rates_checked=True)
+
+
 def list_sources(include_closed: bool = False) -> list[dict]:
     """Logs in the current view (open ones), or every stored log with include_closed."""
+    _backfill_rates()
     out = []
     for p in sorted((data_dir() / "sources").iterdir()):
         if (p / "meta.json").exists():

@@ -25,6 +25,8 @@ import operator
 import numpy as np
 import pandas as pd
 
+from .rates import reconstruct
+
 MAX_EXPR_LEN = 500
 
 
@@ -68,7 +70,12 @@ class _Ctx:
     def deriv(self, x):
         x = np.asarray(x, dtype=float)
         bad = np.isnan(x)
-        out = np.gradient(_fill(x), self.t) if not bad.all() else x
+        if bad.all():
+            return x
+        # a channel read slower than the log's rate is a staircase; differentiate the line
+        # through its real readings, not the steps
+        line = _fill(x) if bad.any() else reconstruct(self.t, x)
+        out = np.gradient(line, self.t)
         out[bad] = np.nan
         return out
 
