@@ -46,6 +46,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const eventsRef = useRef<{ rule: string; t_start: number; t_end: number }[]>([]);
   const applyingRef = useRef(false); // true while we reload data, so the zoom store is left alone
   const [width, setWidth] = useState(0);
+  const [height, setHeight] = useState(0);
   const [mode, setMode] = useState<"auto" | "line" | "bands">("auto");
   const [readout, setReadout] = useState<{ t: number | null; v: (number | null)[] }>({ t: null, v: [] });
 
@@ -79,13 +80,17 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const gmeta = groups.map((ch) => meta.find((m) => m.name === ch)!);
   const title = gmeta.map((m) => (m.unit ? `${m.name} (${m.unit})` : m.name)).join(", ");
 
-  // Track the container width.
+  // Track the container size. Its height changes whenever a plot is added or removed.
   useEffect(() => {
     const el = boxRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(Math.floor(el.clientWidth)));
+    const measure = () => {
+      setWidth(Math.floor(el.clientWidth));
+      setHeight(Math.floor(el.clientHeight));
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setWidth(Math.floor(el.clientWidth));
+    measure();
     return () => ro.disconnect();
   }, []);
 
@@ -377,7 +382,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     const u = plotRef.current;
     const el = boxRef.current;
     if (u && el && width >= 50) u.setSize({ width, height: el.clientHeight || 160 });
-  }, [width, isLast]);
+  }, [width, height, isLast]);
 
   // When nothing is zoomed and the extent changes (new import, offset edit), refit.
   useEffect(() => {
