@@ -835,3 +835,40 @@ def load_logs(include_closed: bool = False) -> list[Log]:
             )
         )
     return logs
+
+
+# ---------------------------------------------------------------------------------------------
+# what the page asks for
+
+_cache: dict[str, tuple[tuple, dict]] = {}
+
+
+def run() -> dict:
+    """Review the open logs. The result is kept until a log or a limit changes, so the page and the
+    badge on the tab can both ask without the checks running twice."""
+    from . import store
+
+    recs = store.list_sources()
+    cfg = limits()
+    sig = (
+        tuple(
+            (r["id"], (store.data_dir() / "sources" / r["id"] / "data.parquet").stat().st_mtime_ns, r.get("offset_s", 0.0))
+            for r in recs
+        ),
+        json.dumps(cfg, sort_keys=True),
+    )
+    d = str(store.data_dir())
+    hit = _cache.get(d)
+    if hit is None or hit[0] != sig:
+        _cache[d] = (sig, evaluate(load_logs(), cfg))
+    result = _cache[d][1]
+    off = {r["id"]: r.get("offset_s", 0.0) for r in recs}
+    skip = set(muted())
+    return {
+        "findings": [f for f in result["findings"] if f["key"] not in skip],
+        "muted": [f for f in result["findings"] if f["key"] in skip],
+        "notes": result["notes"],
+        "checked": result["checked"],
+        "offsets": off,
+        "limits": cfg,
+    }

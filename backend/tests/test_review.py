@@ -238,3 +238,52 @@ def test_findings_can_be_marked_normal_and_brought_back(tmp_path, monkeypatch):
 def test_no_logs_says_so():
     out = review.evaluate([])
     assert out["findings"] == [] and out["notes"]
+
+
+# --- the endpoints ------------------------------------------------------------------------------
+
+
+def _upload(client, lg):
+    import io
+
+    import pandas as pd
+
+    df = pd.DataFrame({"time_s": lg.t, **lg.cols})
+    r = client.post("/api/sources", files={"file": ("log.csv", io.BytesIO(df.to_csv(index=False).encode()), "text/csv")})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_the_review_endpoint_finds_mutes_and_restores(client):
+    for i in range(1, 4):
+        _upload(client, make_log(i))
+    body = client.get("/api/review").json()
+    link = next(f for f in body["findings"] if f["kind"] == "link")
+    assert body["checked"]["logs"] == 3 and link["count"] == 6
+
+    after = client.post("/api/review/mute", params={"key": link["key"]}).json()
+    assert link["key"] not in [f["key"] for f in after["findings"]]
+    assert link["key"] in [f["key"] for f in after["muted"]]
+
+    back = client.delete("/api/review/mute", params={"key": link["key"]}).json()
+    assert link["key"] in [f["key"] for f in back["findings"]] and back["muted"] == []
+
+
+def test_limits_through_the_endpoint(client):
+    _upload(client, make_log(1))
+    r = client.put("/api/review/limits", json={"limits": [{"channel": "temp", "op": ">", "value": 75, "seconds": 2, "message": "Too hot"}]})
+    assert r.status_code == 200
+    assert any(f["title"] == "Too hot" for f in r.json()["findings"])
+    assert r.json()["limits"][0]["channel"] == "temp"
+    bad = client.put("/api/review/limits", json={"limits": [{"channel": "temp", "op": "~", "value": 1}]})
+    assert bad.status_code == 422 and "above or below" in bad.json()["detail"]
+    assert client.get("/api/review").json()["limits"][0]["value"] == 75.0  # the bad edit changed nothing
+
+
+def test_the_result_follows_the_open_logs(client):
+    first = _upload(client, make_log(1))
+    assert client.get("/api/review").json()["checked"]["logs"] == 1
+    _upload(client, make_log(2))
+    assert client.get("/api/review").json()["checked"]["logs"] == 2
+    assert client.post(f"/api/library/{first['id']}/close").status_code == 200
+    assert client.get("/api/review").json()["checked"]["logs"] == 1

@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, can_import, laps, lifeview, live, pulls, report, store, summary, workspaces
+from . import analysis, can_import, laps, lifeview, live, pulls, report, review, store, summary, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_any
@@ -403,6 +403,36 @@ def channel_histogram(
 ) -> dict:
     _, arr = _window(source_id, [channel], t0, t1)
     return analysis.histogram(arr[channel], bins)
+
+
+class LimitsBody(BaseModel):
+    limits: list[dict]
+
+
+@app.get("/api/review")
+def get_review() -> dict:
+    return review.run()
+
+
+@app.post("/api/review/mute")
+def mute_finding(key: str = Query(..., min_length=1, max_length=300)) -> dict:
+    review.mute(key)
+    return review.run()
+
+
+@app.delete("/api/review/mute")
+def unmute_finding(key: str = Query(..., min_length=1, max_length=300)) -> dict:
+    review.unmute(key)
+    return review.run()
+
+
+@app.put("/api/review/limits")
+def put_limits(body: LimitsBody) -> dict:
+    try:
+        review.set_limits(body.limits)
+    except review.LimitError as e:
+        raise HTTPException(422, str(e)) from e
+    return review.run()
 
 
 @app.get("/api/sources/{source_id}/spectrum")
