@@ -21,4 +21,4 @@ def client(tmp_path, monkeypatch):
 
     from backend.app.main import app
 
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))  # requests come from the PC itself

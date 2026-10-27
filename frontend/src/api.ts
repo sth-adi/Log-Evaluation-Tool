@@ -1,5 +1,7 @@
 import type { ConvertJob, ConvertStatus, LibraryEntry, Metric, SavedView, Source, ViewPayload } from "./store";
 
+export type ShareInfo = { enabled: false } | { enabled: true; port: number; urls: string[] };
+
 async function parse<T>(r: Response): Promise<T> {
   if (!r.ok) {
     let detail = `${r.status} ${r.statusText}`;
@@ -365,6 +367,9 @@ export const api = {
   library: () => getJson<LibraryEntry[]>("/api/library", {}),
   libraryOpen: (id: string) => fetch(`/api/library/${id}/open`, { method: "POST" }).then((r) => parse<Source>(r)),
   libraryClose: (id: string) => fetch(`/api/library/${id}/close`, { method: "POST" }).then((r) => parse<Source>(r)),
+  health: () => fetch("/api/health").then((r) => parse<{ local: boolean; sharing: boolean }>(r)),
+  share: () => fetch("/api/share").then((r) => parse<ShareInfo>(r)),
+  resetShare: () => fetch("/api/share/reset", { method: "POST" }).then((r) => parse<ShareInfo>(r)),
   libraryFolder: () => fetch("/api/library/folder/open", { method: "POST" }).then((r) => parse<{ path: string }>(r)),
 
   convertStatus: () => getJson<ConvertStatus>("/api/convert/status", {}),

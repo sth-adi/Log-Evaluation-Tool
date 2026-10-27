@@ -21,6 +21,7 @@ export function LogRail() {
   const setView = useStore((s) => s.setView);
   const arrange = useStore((s) => s.arrange);
   const setManaging = useStore((s) => s.setManaging);
+  const setRailOpen = useStore((s) => s.setRailOpen);
 
   if (!sources.length) return null;
   const ordered = [...sources].sort((a, b) => a.offset_s - b.offset_s);
@@ -33,7 +34,14 @@ export function LogRail() {
     <nav className="rail" aria-label="Logs">
       <div className="rail-head">
         <h2>Logs</h2>
-        <button className="btn ghost sm" onClick={() => setView(null)} title="Zoom the plots out to every log">
+        <button
+          className="btn ghost sm"
+          onClick={() => {
+            setView(null);
+            setRailOpen(false);
+          }}
+          title="Zoom the plots out to every log"
+        >
           Show all
         </button>
       </div>
@@ -50,6 +58,7 @@ export function LogRail() {
                 className="log-main"
                 onClick={() => {
                   setView([s.offset_s, s.offset_s + s.duration_s]);
+                  setRailOpen(false);
                 }}
                 title="Zoom the plots to this log"
               >

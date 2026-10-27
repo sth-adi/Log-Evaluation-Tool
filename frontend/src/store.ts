@@ -85,6 +85,14 @@ type State = {
   lanes: Lane[];
   library: LibraryEntry[];
   libraryOpen: boolean;
+  /** Whether this browser is on the PC that runs the tool, and whether phone access is on. Assume the PC until known. */
+  access: { local: boolean; sharing: boolean };
+  loadAccess: () => Promise<void>;
+  shareOpen: boolean;
+  setShareOpen: (open: boolean) => void;
+  /** On a phone the log list slides over the plots instead of sitting beside them. */
+  railOpen: boolean;
+  setRailOpen: (open: boolean) => void;
   setLibraryOpen: (open: boolean) => void;
   loadLibrary: () => Promise<void>;
   addFromLibrary: (ids: string[]) => Promise<void>;
@@ -302,6 +310,18 @@ export const useStore = create<State>((set, get) => ({
   setTool: (tool) => set({ tool, mode: "analyse" }),
   library: [],
   libraryOpen: false,
+  access: { local: true, sharing: false },
+  loadAccess: async () => {
+    try {
+      set({ access: await api.health() });
+    } catch {
+      /* the first real request reports a missing backend */
+    }
+  },
+  shareOpen: false,
+  setShareOpen: (shareOpen) => set({ shareOpen }),
+  railOpen: false,
+  setRailOpen: (railOpen) => set({ railOpen }),
   setLibraryOpen: (libraryOpen) => {
     set({ libraryOpen });
     if (libraryOpen) void get().loadLibrary();

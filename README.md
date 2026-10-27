@@ -16,7 +16,21 @@ The backend has automated tests. The Windows scripts and the browser UI have not
 
 ## Open it
 
-Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desktop). It starts the tool, waits until it is ready and opens http://127.0.0.1:8000 in your browser. If it is already running it just opens the page. A minimised window stays in the taskbar while the tool runs; close that window to stop it. Binds to 127.0.0.1 only, so nothing is visible on the network.
+Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desktop). It starts the tool, waits until it is ready and opens http://127.0.0.1:8000 in your browser. If it is already running it just opens the page. A minimised window stays in the taskbar while the tool runs; close that window to stop it. By default it answers only this PC, so nothing is visible on the network.
+
+## On a phone
+
+Double-click **`Log Evaluation Tool (phone).bat`** instead (or run `.\scripts\run.ps1 -Phone`). The tool opens with a QR code; scan it with the phone's camera, with the phone on the same Wi-Fi as the PC. You can also get the code later from **More > Open on phone**. The first time, Windows asks whether Python may use the network: choose **Private networks** and **Allow**.
+
+On the phone the log list slides in from the menu button, the top bar fits the screen, and the plots take finger gestures: slide a finger along a plot to read values, pinch to zoom, double-tap to see everything again, and swipe up or down to scroll through the plots. Logs can be added from the phone's own storage, and Analyse works as on the PC. Things that act on the PC itself, such as converting `.LRD` logs through LifeView, opening Explorer and choosing a serial port for live data, only work on the PC.
+
+How it stays safe:
+
+- Phone access is off unless you start it from the phone launcher. With it off, every other device is refused, even if the tool is reachable on the network.
+- The link on the PC contains a long random key. Opening it once signs that phone in for a year, then the key is removed from the address. **New link** (in the same window) signs every phone out.
+- The tool still only reads files; it has no way to talk to the car.
+- The key travels over plain HTTP, so use this on a network you trust (a phone hotspot is fine). Do not forward the port to the internet. Guest and campus Wi-Fi often stop devices seeing each other; a hotspot gets round that.
+- The key is kept in `share_key.txt` beside the library.
 
 ## Giving it to someone else
 
@@ -26,7 +40,7 @@ Build a package that runs on any Windows 10/11 PC with nothing installed (no Pyt
 .\scripts\build-portable.ps1        # about 2 minutes; writes release\LogEvaluationTool-win64.zip (about 80 MB)
 ```
 
-Send that zip. The other person unzips it anywhere and double-clicks **`Log Evaluation Tool.bat`**; their browser opens the tool. It carries its own private Python and every package. Their logs and library are kept in `%LOCALAPPDATA%\Log Evaluation Tool`, so unpacking a newer version later keeps them. Converting `.LRD` logs still needs LifeView on that PC (CSV import does not). The zip is built from your working checkout, so run the tests and `npm run build` first.
+Send that zip. The other person unzips it anywhere and double-clicks **`Log Evaluation Tool.bat`** (or the phone launcher beside it); their browser opens the tool. It carries its own private Python and every package. Their logs and library are kept in `%LOCALAPPDATA%\Log Evaluation Tool`, so unpacking a newer version later keeps them. Converting `.LRD` logs still needs LifeView on that PC (CSV import does not). The zip is built from your working checkout, so run the tests and `npm run build` first.
 
 ## The library
 

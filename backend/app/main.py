@@ -17,12 +17,12 @@ import re
 
 import numpy as np
 import pandas as pd
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import analysis, can_import, laps, lifeview, live, pulls, report, store, summary, workspaces
+from . import access, analysis, can_import, laps, lifeview, live, pulls, report, store, summary, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_any
@@ -31,12 +31,19 @@ MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 KINDS = {"ecu", "hcu", "other"}
 
 app = FastAPI(title="Log Evaluation Tool", version="0.1.0")
+app.add_middleware(access.AccessMiddleware)  # other devices (a phone) need sharing on and the key
 app.include_router(live.router)
+app.include_router(access.router)
 
 
 @app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok", "data_dir": str(store.data_dir())}
+def health(request: Request) -> dict:
+    return {
+        "status": "ok",
+        "data_dir": str(store.data_dir()),
+        "local": access.is_local(request),  # false on a phone: PC-only actions are hidden there
+        "sharing": access.sharing_enabled(),
+    }
 
 
 @app.post("/api/sources")
@@ -74,8 +81,14 @@ async def import_source(
 
 
 @app.get("/api/convert/status")
-def convert_status() -> dict:
+def convert_status(request: Request) -> dict:
     """Can .LRD logs be converted on this machine, and is LifeView already open?"""
+    if not access.is_local(request):
+        return {
+            "available": False,
+            "reason": "Converting .LRD logs only works on the PC that runs the tool. Convert them there, or import their CSV files.",
+            "lifeview_open": False,
+        }
     st = lifeview.status()
     st["lifeview_open"] = lifeview.lifeview_running() if st["available"] else False
     return st
@@ -106,7 +119,7 @@ def delete_dbc(dbc_id: str) -> None:
         raise HTTPException(404, "unknown DBC file") from None
 
 
-@app.post("/api/convert", status_code=202)
+@app.post("/api/convert", status_code=202, dependencies=[Depends(access.require_local)])
 async def convert(files: list[UploadFile] = File(...)) -> dict:
     """Convert .LRD logs with LifeView, then import the CSVs. Returns a job to poll."""
     st = lifeview.status()
@@ -131,7 +144,7 @@ async def convert(files: list[UploadFile] = File(...)) -> dict:
         raise HTTPException(409, str(e)) from None
 
 
-@app.get("/api/convert/{job_id}")
+@app.get("/api/convert/{job_id}", dependencies=[Depends(access.require_local)])
 def convert_job(job_id: str) -> dict:
     try:
         return lifeview.get(job_id).public()
@@ -139,7 +152,7 @@ def convert_job(job_id: str) -> dict:
         raise HTTPException(404, "unknown conversion") from None
 
 
-@app.post("/api/convert/{job_id}/cancel")
+@app.post("/api/convert/{job_id}/cancel", dependencies=[Depends(access.require_local)])
 def convert_cancel(job_id: str) -> dict:
     try:
         return lifeview.cancel(job_id).public()
@@ -153,7 +166,7 @@ def library() -> list[dict]:
     return store.library()
 
 
-@app.post("/api/library/folder/open")
+@app.post("/api/library/folder/open", dependencies=[Depends(access.require_local)])
 def library_open_folder() -> dict:
     """Show the folder holding the CSV copies in Explorer."""
     folder = store.data_dir() / "exports"

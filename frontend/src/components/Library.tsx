@@ -16,6 +16,7 @@ export function Library() {
   const addFromLibrary = useStore((s) => s.addFromLibrary);
   const deleteForever = useStore((s) => s.deleteForever);
   const openFolder = useStore((s) => s.openLibraryFolder);
+  const local = useStore((s) => s.access.local);
   const [q, setQ] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [sure, setSure] = useState<string | null>(null);
@@ -65,9 +66,11 @@ export function Library() {
         <div className="lib-tools">
           <ImportButton className="btn primary">Add files</ImportButton>
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, date or time" aria-label="Search the library" />
-          <button className="btn ghost" onClick={() => void openFolder()} title="Show the CSV copies in Explorer">
-            Open folder
-          </button>
+          {local && (
+            <button className="btn ghost" onClick={() => void openFolder()} title="Show the CSV copies in Explorer">
+              Open folder
+            </button>
+          )}
           {addable.length > 0 && (
             <button className="btn ghost" onClick={() => setPicked(new Set(addable.map((e) => e.id)))}>
               Select all not in view

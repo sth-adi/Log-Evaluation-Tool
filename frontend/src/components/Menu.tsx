@@ -9,22 +9,27 @@ export function Menu(props: { label: string; items: MenuItem[] }) {
 
   useEffect(() => {
     if (!open) return;
-    const away = (e: MouseEvent) => box.current && !box.current.contains(e.target as Node) && setOpen(false);
+    const away = (e: PointerEvent) => box.current && !box.current.contains(e.target as Node) && setOpen(false);
     const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", away);
+    document.addEventListener("pointerdown", away);
     document.addEventListener("keydown", key);
     return () => {
-      document.removeEventListener("mousedown", away);
+      document.removeEventListener("pointerdown", away);
       document.removeEventListener("keydown", key);
     };
   }, [open]);
 
   return (
     <div className="menu" ref={box}>
-      <button className="btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {props.label}
+      <button className="btn" aria-label={props.label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="menu-label">{props.label}</span>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden className="caret">
           <path d="M2 3.5l3 3 3-3" />
+        </svg>
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden className="menu-dots">
+          <circle cx="4" cy="9" r="1.4" />
+          <circle cx="9" cy="9" r="1.4" />
+          <circle cx="14" cy="9" r="1.4" />
         </svg>
       </button>
       {open && (
