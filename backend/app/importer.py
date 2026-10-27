@@ -392,7 +392,11 @@ def _build(
                 "unit": final_units.get(c, ""),
                 "min": float(np.nanmin(out[c])),
                 "max": float(np.nanmax(out[c])),
-                **({"states": states[inv_rename.get(c, c)]} if inv_rename.get(c, c) in states else {}),
+                **(
+                    {"states": states[inv_rename.get(c, c)], "label_index": True}
+                    if inv_rename.get(c, c) in states
+                    else {}
+                ),
                 **({"native_hz": native[c]} if native[c] else {}),
             }
             for c in out.columns

@@ -50,14 +50,77 @@ def _folder(source_id: str) -> Path:
     return p
 
 
+_reg_lock = threading.Lock()
+
+
+def _canonical_states(df: pd.DataFrame, channels: list[dict]) -> None:
+    """Number the labels of every text channel the same way in all logs.
+
+    The importer numbers a log's labels by sorting the ones that log contains, so NEUTRAL could be
+    2 in one log and 1 in another. A library-wide list per channel (``state_labels.json``, only ever
+    appended to) gives each label one number for good. Rewrites ``df`` and the channel entries."""
+    todo = [c for c in channels if c.get("label_index") and c["name"] in df.columns]
+    if not todo:
+        return
+    with _reg_lock:
+        path = data_dir() / "state_labels.json"
+        registry: dict[str, list[str]] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        before = json.dumps(registry, sort_keys=True)
+        for ch in todo:
+            labels = registry.setdefault(ch["name"], [])
+            for lab in ch["states"].values():
+                if lab not in labels:
+                    labels.append(lab)
+            renumber = {float(i): float(labels.index(lab)) for i, lab in ch["states"].items()}
+            df[ch["name"]] = df[ch["name"]].map(renumber)
+            ch["states"] = {str(i): lab for i, lab in enumerate(labels)}
+            ch["min"] = float(np.nanmin(df[ch["name"]]))
+            ch["max"] = float(np.nanmax(df[ch["name"]]))
+        if json.dumps(registry, sort_keys=True) != before:
+            path.write_text(json.dumps(registry, indent=1), encoding="utf-8")
+
+
+_codes_done: set[str] = set()
+_CAN_SUFFIXES = (".asc", ".blf", ".trc")
+
+
+def _backfill_state_codes() -> None:
+    """Renumber the text channels of logs imported before the numbering was shared between logs."""
+    d = str(data_dir())
+    if d in _codes_done:
+        return
+    _codes_done.add(d)
+    for rec in list_sources(include_closed=True):
+        if rec.get("states_stable"):
+            continue
+        # CAN signals carry the DBC's own numbers, which are not ours to change
+        index_coded = not rec.get("filename", "").lower().endswith(_CAN_SUFFIXES)
+        chans = [c for c in rec["channels"] if c.get("states") and not c.get("derived")]
+        if index_coded and chans:
+            for c in chans:
+                c["label_index"] = True
+            path = _folder(rec["id"]) / "data.parquet"
+            try:
+                df = pd.read_parquet(path)
+                _canonical_states(df, rec["channels"])
+                df.to_parquet(path.with_suffix(".tmp"), index=False, row_group_size=65536)
+                path.with_suffix(".tmp").replace(path)
+            except (OSError, ValueError, pyarrow.ArrowException) as e:  # the log stays usable, numbered as it was
+                log.warning("could not renumber the state channels of %s: %s", rec["id"], e)
+                continue
+        update_source(rec["id"], channels=rec["channels"], states_stable=True)
+
+
 def create_source(
     df: pd.DataFrame, meta: dict, label: str, kind: str, filename: str, extra: dict | None = None
 ) -> dict:
     source_id = uuid.uuid4().hex[:10]
     folder = data_dir() / "sources" / source_id
     folder.mkdir(parents=True)
+    _canonical_states(df, meta["channels"])
     df.to_parquet(folder / "data.parquet", index=False, row_group_size=65536)
     record = {
+        "states_stable": True,
         "id": source_id,
         "label": label,
         "kind": kind,
@@ -106,6 +169,7 @@ def _backfill_rates() -> None:
 
 def list_sources(include_closed: bool = False) -> list[dict]:
     """Logs in the current view (open ones), or every stored log with include_closed."""
+    _backfill_state_codes()
     _backfill_rates()
     out = []
     for p in sorted((data_dir() / "sources").iterdir()):
