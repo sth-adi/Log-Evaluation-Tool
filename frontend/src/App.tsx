@@ -9,6 +9,7 @@ import { Live } from "./components/Live";
 import { LogDrawer, LogRail } from "./components/LogRail";
 import { Menu } from "./components/Menu";
 import { Palette } from "./components/Palette";
+import { Review } from "./components/Review";
 import { Views } from "./components/Views";
 import { extentOf, useStore } from "./store";
 
@@ -30,6 +31,8 @@ export default function App() {
   const setViewsOpen = useStore((s) => s.setViewsOpen);
   const addChannelAll = useStore((s) => s.addChannelAll);
   const view = useStore((s) => s.view);
+  const review = useStore((s) => s.review);
+  const attention = review ? review.findings.filter((f) => f.severity !== "low").length : 0;
   const [dragging, setDragging] = useState(false);
 
   // Open one report per log that has plotted channels, for the zoomed window if there is one.
@@ -107,6 +110,10 @@ export default function App() {
             <button role="tab" aria-selected={mode === "plots"} className={mode === "plots" ? "on" : undefined} onClick={() => setMode("plots")}>
               Plots
             </button>
+            <button role="tab" aria-selected={mode === "review"} className={mode === "review" ? "on" : undefined} onClick={() => setMode("review")}>
+              Review
+              {attention > 0 && <span className="tab-count" aria-label={`${attention} to look at`}>{attention}</span>}
+            </button>
             <button role="tab" aria-selected={mode === "analyse"} className={mode === "analyse" ? "on" : undefined} onClick={() => setMode("analyse")}>
               Analyse
             </button>
@@ -152,6 +159,8 @@ export default function App() {
               </button>
             )}
           </div>
+        ) : mode === "review" ? (
+          <Review />
         ) : mode === "analyse" ? (
           <Analyse />
         ) : lanes.length === 0 ? (

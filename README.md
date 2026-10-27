@@ -39,7 +39,26 @@ Every converted or imported log is kept in the **Library** (top bar). Closing a 
 
 ## Finding your way round
 
-The top bar has two modes. **Plots** shows channels over time; **Analyse** opens a list of tools grouped by what you want to find out (one channel, two channels, compare runs, find problems). **Logs** adds files or opens ones you already have, and **More** holds saved views, the report and live data. Settings you rarely change sit behind an **Options** or **Settings** button.
+The top bar has three modes. **Plots** shows channels over time; **Review** lists what the tool found wrong on its own; **Analyse** opens a list of tools grouped by what you want to find out (one channel, two channels, compare runs, find problems). **Logs** adds files or opens ones you already have, and **More** holds saved views, the report and live data. Settings you rarely change sit behind an **Options** or **Settings** button.
+
+## Review
+
+**Review** checks every open log as soon as it is imported and lists what does not fit. Nothing has to be set up first. A number on the tab says how many things need a look.
+
+The checks, none of which need a limit from you:
+
+- **Switches and what they should cause.** The tool finds switches (a request, a mode, a flag) that are nearly always followed by a movement in some other channel, then reports the times they were not. For example, a gear cut request that is followed by an ignition cut 19 times out of 26. It looks for what the misses have in common (here: six of the seven were at standstill) and puts the one that does not fit first. A state with several values needs a stronger link than an on/off switch, and a single miss is only reported when chance almost never produces the response.
+- **The ECU's own fault channels**, only while the engine runs. A fault that reads the same way in most of the running time is shown as "probably normal" (a missing-tooth wheel reporting its long gap, for example), not as an alarm.
+- **Sensors that go flat.** A channel that moves in other logs but does not move at all in one run. A channel that never moves anywhere is listed once as unused.
+- **Dropouts**: a channel that goes blank while the others keep logging, and stretches with no samples.
+
+Each finding says what it saw and the numbers behind it, and **Show** jumps to that moment on the plots with the relevant channels. **This is normal** stops a finding being raised again; it stays under *Marked as normal* so you can bring it back. A finding is not a diagnosis: it says the log does not match how the car behaves in your other logs, so it gets stronger as you add logs.
+
+**Your limits** (at the bottom of Review) are the only thing you set by hand, for physical things the logs cannot tell on their own, such as a minimum oil pressure or a maximum coolant temperature: a channel, above or below a value, for how many seconds, and whether it counts only while the engine runs.
+
+All checks are deterministic, so the same logs always give the same findings. The code is `backend/app/review.py`.
+
+**State numbering.** Text channels such as gear are stored as numbers. Each label now keeps one number across every log (the list is `data/state_labels.json`), so a rule or a plot comparing logs always means the same gear. Logs imported earlier were renumbered once.
 
 ## Laps
 

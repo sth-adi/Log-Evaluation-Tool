@@ -431,7 +431,7 @@ def find_links(logs: list[Log]) -> list[dict]:
                     key=f"link:{t['channel']}={_num(t['level'])}:{chans[0]}",
                     kind="link",
                     severity="low" if reason and reason["all_fit"] else "medium",
-                    title=f"When {trig}, {shown} usually moves, but not always",
+                    title=f"When {trig}, {shown} usually {'moves' if len(chans) == 1 else 'move'}, but not always",
                     detail=(
                         f"It moved within {WINDOW_S:g} s after {g['hits']} of {g['n']} events and not after {g['n'] - g['hits']}. "
                         + (reason["text"] if reason else "The misses have no condition in common that the other channels show.")

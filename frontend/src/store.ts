@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, type Dbc, type LapParams } from "./api";
+import { api, type Dbc, type Finding, type LapParams, type Limit, type Review, type ReviewOcc } from "./api";
 import { readJson, writeJson } from "./storage";
 
 export type Channel = {
@@ -123,8 +123,14 @@ type State = {
   openView: (v: SavedView) => void;
   deleteView: (id: string) => Promise<void>;
   importViewFile: (file: File) => Promise<void>;
-  mode: "plots" | "analyse" | "live";
-  setMode: (m: "plots" | "analyse" | "live") => void;
+  mode: "plots" | "review" | "analyse" | "live";
+  setMode: (m: "plots" | "review" | "analyse" | "live") => void;
+  review: Review | null;
+  loadReview: () => Promise<void>;
+  muteFinding: (key: string) => Promise<void>;
+  restoreFinding: (key: string) => Promise<void>;
+  saveLimits: (limits: Limit[]) => Promise<boolean>;
+  openFinding: (f: Finding, o: ReviewOcc) => void;
   tool: ToolId | null; // the open tool under Analyse, or null for the list of tools
   setTool: (t: ToolId | null) => void;
   view: [number, number] | null; // null = full extent
@@ -298,6 +304,55 @@ export const useStore = create<State>((set, get) => ({
   view: null,
   mode: "plots",
   setMode: (mode) => set({ mode }),
+  review: null,
+  loadReview: async () => {
+    if (!get().sources.length) {
+      set({ review: null });
+      return;
+    }
+    try {
+      set({ review: await api.review() });
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not check the logs. ${(e as Error).message}` } });
+    }
+  },
+  muteFinding: async (key) => {
+    try {
+      set({ review: await api.muteFinding(key) });
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not mark that as normal. ${(e as Error).message}` } });
+    }
+  },
+  restoreFinding: async (key) => {
+    try {
+      set({ review: await api.restoreFinding(key) });
+    } catch (e) {
+      set({ message: { kind: "error", text: `Could not bring that back. ${(e as Error).message}` } });
+    }
+  },
+  saveLimits: async (limits) => {
+    try {
+      set({ review: await api.setLimits(limits) });
+      return true;
+    } catch (e) {
+      set({ message: { kind: "error", text: `Limits not saved. ${(e as Error).message}` } });
+      return false;
+    }
+  },
+  // Show a finding where it happened: plot the channels it is about and zoom to that moment.
+  openFinding: (f, o) => {
+    const src = get().sources.find((s) => s.id === o.log_id);
+    if (!src) return;
+    for (const ch of f.channels.slice(0, 3)) {
+      const plotted = get().lanes.some((l) => l.series.some((x) => x.channel === ch));
+      if (!plotted && src.channels.some((c) => c.name === ch)) get().addChannelAll(ch, false);
+    }
+    const pad = Math.max(1.5, (o.t1 - o.t0) * 0.5);
+    set({
+      mode: "plots",
+      view: [src.offset_s + Math.max(o.t0 - pad, 0), src.offset_s + Math.min(o.t1 + pad, src.duration_s)],
+    });
+  },
   tool: null,
   setTool: (tool) => set({ tool, mode: "analyse" }),
   library: [],
@@ -452,6 +507,7 @@ export const useStore = create<State>((set, get) => ({
     try {
       const sources = await api.sources();
       set((s) => ({ sources, lanes: syncLanes(s.lanes, sources) }));
+      void get().loadReview();
     } catch (e) {
       set({ message: { kind: "error", text: `Could not reach the backend: ${(e as Error).message}` } });
     }

@@ -20,6 +20,37 @@ function getJson<T>(path: string, params: Record<string, string | number | undef
   return fetch(`${path}?${q}`).then((r) => parse<T>(r));
 }
 
+export type Severity = "high" | "medium" | "low";
+export type ReviewOcc = { log_id: string; label: string; t0: number; t1: number; note: string; fits?: boolean };
+export type Finding = {
+  key: string;
+  kind: "link" | "report" | "stuck" | "unused" | "dropout" | "gap" | "limit";
+  severity: Severity;
+  title: string;
+  detail: string;
+  channels: string[];
+  count: number;
+  occurrences: ReviewOcc[];
+  evidence?: { events: number; followed: number; chance: number };
+};
+export type Limit = {
+  id?: string;
+  channel: string;
+  op: ">" | "<";
+  value: number;
+  seconds: number;
+  severity: Severity;
+  message: string;
+  running_only: boolean;
+};
+export type Review = {
+  findings: Finding[];
+  muted: Finding[];
+  notes: string[];
+  checked: { logs: number; channels: number };
+  limits: Limit[];
+};
+
 export type LapParams = {
   method: "auto" | "reset" | "change" | "trigger" | "distance" | "manual";
   channel?: string;
@@ -337,6 +368,18 @@ export const api = {
       native_hz: number | null;
       samples: number;
     }>(`/api/sources/${id}/spectrum`, { channel, t0, t1 }),
+
+  review: () => getJson<Review>("/api/review", {}),
+  muteFinding: (key: string) =>
+    fetch(`/api/review/mute?${new URLSearchParams({ key })}`, { method: "POST" }).then((r) => parse<Review>(r)),
+  restoreFinding: (key: string) =>
+    fetch(`/api/review/mute?${new URLSearchParams({ key })}`, { method: "DELETE" }).then((r) => parse<Review>(r)),
+  setLimits: (limits: Limit[]) =>
+    fetch("/api/review/limits", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limits }),
+    }).then((r) => parse<Review>(r)),
 
   scatter: (id: string, x: string, y: string, t0?: number, t1?: number) =>
     getJson<{ t: number[]; x: number[]; y: number[]; points: number; correlation: number | null }>(
