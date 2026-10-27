@@ -192,6 +192,77 @@ def test_a_jump_in_time_is_reported_as_missing_samples():
     assert "missing" in f["title"] and "3.0" in f["occurrences"][0]["note"]
 
 
+# --- drift: reading differently than before, at the same load -------------------------------------
+
+
+def _drive(seed, start, shift=0.0, spread=(2000, 6000), label_time=None):
+    """A log where `pressure` depends on rpm (and so on load), plus `shift` if something changed."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(60 * RATE) / RATE
+    rpm = spread[0] + (spread[1] - spread[0]) * (0.5 + 0.5 * np.sin(t / 4 + seed))
+    thr = np.full(t.size, 80.0)
+    cols = {
+        "rpm": rpm,
+        "tps1": thr,
+        "pressure": 200 + 0.02 * rpm + shift + rng.normal(0, 1.0, t.size),
+        "distance": np.cumsum(rpm) / 1e6 + (seed - 1) * 5,  # climbs in every run
+        "oilTemp": 60 + 0.3 * t + shift * 0.0 + rng.normal(0, 0.3, t.size),  # warms up the same way each time
+    }
+    return Log(id=f"d{seed}", label=f"run {seed}", t=t, cols=cols, meta={"pressure": {"unit": "kPa"}, "oilTemp": {"unit": "°C"}}, started_at=start)
+
+
+def test_a_channel_that_reads_higher_at_the_same_load_is_flagged():
+    logs = [_drive(1, "2025-11-19T11:00:00"), _drive(2, "2025-11-19T11:10:00", shift=25)]
+    f = [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift"]
+    assert [x["channels"] for x in f] == [["pressure"]]
+    assert "higher" in f[0]["title"] and f[0]["occurrences"][0]["log_id"] == "d2"
+    assert f[0]["severity"] == "medium"
+
+
+def test_running_at_a_different_load_is_not_drift():
+    # the second run only visits higher rpm, where `pressure` is naturally higher
+    logs = [_drive(1, "2025-11-19T11:00:00"), _drive(2, "2025-11-19T11:10:00", spread=(3500, 6000))]
+    assert [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift"] == []
+
+
+def test_a_distance_or_timer_that_only_climbs_is_not_drift():
+    logs = [_drive(1, "2025-11-19T11:00:00"), _drive(2, "2025-11-19T11:10:00")]
+    assert [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift"] == []
+
+
+def test_the_order_is_the_order_the_runs_happened_not_the_order_they_were_opened():
+    later = _drive(2, "2025-11-19T11:10:00", shift=25)
+    earlier = _drive(1, "2025-11-19T11:00:00")
+    f = [f for f in review.evaluate([later, earlier])["findings"] if f["kind"] == "drift"][0]
+    assert f["occurrences"][0]["log_id"] == "d2" and "higher" in f["title"]
+
+
+def test_a_temperature_shift_says_that_warmer_starts_explain_it():
+    logs = [_drive(1, "2025-11-19T11:00:00"), _drive(2, "2025-11-19T11:10:00")]
+    for l in logs[1:]:
+        l.cols["oilTemp"] = l.cols["oilTemp"] + 15  # the second run started warmer
+    f = [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift"][0]
+    assert f["channels"] == ["oilTemp"] and "start warmer" in f["detail"]
+
+
+def test_a_tiny_move_in_a_tightly_regulated_channel_is_not_a_change():
+    logs = [_drive(1, "2025-11-19T11:00:00"), _drive(2, "2025-11-19T11:10:00")]
+    for i, l in enumerate(logs):
+        l.cols["fuelPressure"] = 4000 + 0.3 * np.random.default_rng(i).normal(0, 1, l.n) + (6 if i else 0)  # 0.15% shift
+    assert [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift" and f["channels"] == ["fuelPressure"]] == []
+
+
+def test_a_timer_that_updates_in_a_few_steps_is_still_an_accumulator():
+    logs = [_drive(1, "2025-11-19T11:00:00"), _drive(2, "2025-11-19T11:10:00")]
+    for i, l in enumerate(logs):
+        l.cols["onLoadTime"] = np.minimum(np.arange(l.n) // 3000, 9) * (3 + 7 * i)  # steps up, never down
+    assert [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift" and f["channels"] == ["onLoadTime"]] == []
+
+
+def test_one_log_has_nothing_to_be_compared_with():
+    assert [f for f in review.evaluate([_drive(1, "2025-11-19T11:00:00")])["findings"] if f["kind"] == "drift"] == []
+
+
 # --- limits -------------------------------------------------------------------------------------
 
 

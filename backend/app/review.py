@@ -44,6 +44,21 @@ MIN_REASON_MISSES = 3
 CLOCK_LIKE = 0.7  # a channel that mostly follows the time (a warming engine) only says "early in the run"
 MAX_OCCURRENCES = 40  # shown per finding; the count still says how many there were
 
+RPM_BIN = 1500.0  # operating points: rpm in bands this wide, and three throttle bands
+THROTTLE_EDGES = (25.0, 70.0)
+MIN_BIN_S = 1.0  # a log must spend this long in a band for the band to be compared
+DRIFT_NOISE = 3.0  # in a single band the change must be this many times the channel's own scatter there
+DRIFT_NOISE_MANY = 1.0  # ... but when it shows the same way in this many bands, once the scatter is enough
+MANY_BANDS = 3
+DRIFT_RANGE = 0.05  # ... and at least this fraction of the channel's range
+DRIFT_LEVEL = 0.01  # ... and at least this fraction of the channel's own level, so a tightly regulated
+# pressure that moved 0.5% is not a change just because its usual range is tiny
+DRIFT_SIGNIFICANT = 0.2  # a change of this fraction of the range is "worth a look", smaller is "probably normal"
+MAX_DRIFT = 8
+TEMPERATURE = re.compile(r"°\s*C|deg\s*C|^C$", re.I)
+GEAR = re.compile(r"^gear$", re.I)
+THROTTLE = re.compile(r"^(tps\d?|throttle\w*)$", re.I)
+
 SELF_REPORT = re.compile(r"fault|fail|limp|warn|alarm|diag", re.I)
 SERIOUS = re.compile(r"fault|fail|limp", re.I)
 COUNTER = re.compile(r"fail|fault|error", re.I)
@@ -62,6 +77,7 @@ class Log:
     cols: dict[str, np.ndarray]
     meta: dict[str, dict] = field(default_factory=dict)
     offset_s: float = 0.0
+    started_at: str | None = None
 
     @property
     def n(self) -> int:
@@ -124,6 +140,21 @@ def _num(v: float) -> str:
 def _is_monotonic(x: np.ndarray) -> bool:
     v = _finite(x)
     return v.size > 50 and np.unique(v).size > 50 and bool(np.all(np.diff(v) >= 0) or np.all(np.diff(v) <= 0))
+
+
+def _accumulates(x: np.ndarray) -> bool:
+    """A distance, a timer or a running maximum: it nearly only ever goes one way, so a log that
+    starts later or runs longer reads higher without anything having changed."""
+    v = _finite(x)
+    d = np.diff(v)
+    d = d[d != 0]
+    if d.size < 5:
+        return False
+    up = float((d > 0).mean())
+    if max(up, 1 - up) >= 0.97:
+        return True
+    # a timer that is reset now and then: it starts every log at zero and mostly counts up
+    return bool(v[0] == 0 and up >= 0.8)
 
 
 def _is_counter(x: np.ndarray) -> bool:
@@ -710,6 +741,116 @@ def find_limit_breaches(logs: list[Log], limits: list[dict]) -> tuple[list[dict]
 
 
 # ---------------------------------------------------------------------------------------------
+# a channel that reads differently than in earlier runs, at the same load
+
+
+def _op_points(log: Log) -> tuple[np.ndarray, np.ndarray | None]:
+    """Operating point of every sample (rpm band, throttle band and gear), -1 where the engine is
+    not pulling. None when there is no rpm channel."""
+    rpm = next((v for k, v in log.cols.items() if k.lower() == "rpm"), None)
+    if rpm is None:
+        return np.full(log.n, -1), None
+    thr = next((v for k, v in log.cols.items() if THROTTLE.match(k)), None)
+    band = np.floor(np.nan_to_num(rpm, nan=0.0) / RPM_BIN).astype(int)
+    point = band * 10
+    if thr is not None:
+        point = point + np.digitize(np.nan_to_num(thr, nan=0.0), THROTTLE_EDGES)
+    gear = next((v for k, v in log.cols.items() if GEAR.match(k)), None)
+    if gear is not None:  # the same rpm in another gear is a different speed and a different load
+        point = point * 10 + np.mod(np.nan_to_num(gear, nan=0.0).astype(int), 10)
+    point = np.where(log.running() & (band >= 1), point, -1)
+    return point, rpm
+
+
+def find_drift(logs: list[Log]) -> list[dict]:
+    """Compare each log with the ones before it, only where the engine was at the same rpm and
+    throttle. Temperatures warming up and the load changing do not count; what is left is the car
+    behaving differently than it did, which is what a change to the car or a failing part looks like."""
+    ordered = sorted(logs, key=lambda l: l.started_at or "")
+    if len(ordered) < 2:
+        return []
+    points = {l.id: _op_points(l)[0] for l in ordered}
+    if all((p < 0).all() for p in points.values()):
+        return []
+    skip = {k for l in ordered for k in l.cols if k.lower() == "rpm" or THROTTLE.match(k) or GEAR.match(k)}
+    names = sorted({c for l in ordered for c in l.cols} - skip)
+    found: dict[str, dict] = {}
+    for ch in names:
+        have = [l for l in ordered if ch in l.cols]
+        if len(have) < 2 or _discrete(ordered, ch) or any(_accumulates(l.cols[ch]) for l in have):
+            continue
+        pooled = np.concatenate([_finite(l.cols[ch][points[l.id] >= 0]) for l in have])
+        if pooled.size < 50:
+            continue
+        lo, hi = np.percentile(pooled, [1, 99])
+        span = float(hi - lo)
+        if span <= 0:
+            continue
+        stats: dict[str, dict[int, tuple[float, float, int, int, int]]] = {}
+        for l in have:
+            x, pt = l.cols[ch], points[l.id]
+            per: dict[int, tuple[float, float, int, int, int]] = {}
+            for b in np.unique(pt[pt >= 0]):
+                idx = np.flatnonzero((pt == b) & np.isfinite(x))
+                if idx.size >= MIN_BIN_S * l.rate:
+                    per[int(b)] = (float(np.median(x[idx])), float(np.std(x[idx])), idx.size, int(idx[0]), int(idx[-1]))
+            stats[l.id] = per
+        for k, l in enumerate(have):
+            deltas, noises, refs, vals, span_i = [], [], [], [], [0, 0]
+            for b, (m, sd, n, i0, i1) in stats[l.id].items():
+                before = [stats[e.id][b] for e in have[:k] if b in stats[e.id]]
+                if not before:
+                    continue
+                ref = float(np.median([r[0] for r in before]))
+                deltas.append(m - ref)
+                noises.append(float(np.mean([sd, *[r[1] for r in before]])))
+                refs.append(ref)
+                vals.append(m)
+                span_i = [min(span_i[0] or i0, i0), max(span_i[1], i1)]
+            if not deltas:
+                continue
+            d = float(np.median(deltas))
+            if np.mean(np.sign(deltas) == np.sign(d)) < 0.7:
+                continue  # up in some bands and down in others is not a drift
+            noise = max(float(np.median(noises)), 1e-9)
+            need = DRIFT_NOISE_MANY if len(deltas) >= MANY_BANDS else DRIFT_NOISE
+            ref, val = float(np.median(refs)), float(np.median(vals))
+            if abs(d) < need * noise or abs(d) < DRIFT_RANGE * span or abs(d) < DRIFT_LEVEL * abs(ref):
+                continue
+            unit = l.unit(ch)
+            g = found.setdefault(ch, {"occ": [], "size": 0.0, "unit": unit})
+            g["size"] = max(g["size"], abs(d) / span)
+            g["occ"].append(
+                _occ(l, span_i[0], span_i[1] + 1, f"{_num(ref)} → {_num(val)}{' ' + unit if unit else ''} at the same load ({len(deltas)} band{'s' if len(deltas) > 1 else ''})")
+                | {"delta": d}
+            )
+    findings = []
+    for ch, g in sorted(found.items(), key=lambda kv: -kv[1]["size"])[:MAX_DRIFT]:
+        up = sum(o["delta"] > 0 for o in g["occ"]) >= len(g["occ"]) / 2
+        big = g["size"] >= DRIFT_SIGNIFICANT
+        findings.append(
+            _finding(
+                key=f"drift:{ch}",
+                kind="drift",
+                severity="medium" if big else "low",
+                title=f"{ch} reads {'higher' if up else 'lower'} than in earlier runs at the same load",
+                detail=(
+                    "Compared only where the engine was at the same rpm and throttle, so changes of load do not count. "
+                    "That can be a deliberate change to the car or the tune, or something wearing."
+                    + (
+                        " Runs close together also start warmer, which raises temperatures without anything being wrong."
+                        if TEMPERATURE.search(g["unit"] or "")
+                        else ""
+                    )
+                ),
+                channels=[ch],
+                occurrences=[{k: v for k, v in o.items() if k != "delta"} for o in g["occ"]],
+            )
+        )
+    return findings
+
+
+# ---------------------------------------------------------------------------------------------
 # putting it together
 
 
@@ -722,7 +863,7 @@ def evaluate(logs: list[Log], limits: list[dict] | None = None) -> dict:
         notes.append("No rpm channel, so every sample counts as engine running.")
     if len(logs) < 2:
         notes.append("Only one log is open. Checks that compare logs (stuck sensors, links) get stronger with more.")
-    for check in (find_links, find_self_reports, find_stuck, find_unused, find_dropouts):
+    for check in (find_links, find_self_reports, find_drift, find_stuck, find_unused, find_dropouts):
         findings += check(logs)
     lim, lim_notes = find_limit_breaches(logs, limits or [])
     findings += lim
@@ -832,6 +973,7 @@ def load_logs(include_closed: bool = False) -> list[Log]:
                 cols={c["name"]: df[c["name"]].to_numpy(dtype=float) for c in base},
                 meta={c["name"]: c for c in base},
                 offset_s=float(rec.get("offset_s", 0.0)),
+                started_at=rec.get("started_at"),
             )
         )
     return logs
