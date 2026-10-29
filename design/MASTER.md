@@ -68,6 +68,14 @@ Radii: 6 px controls, 10 px list items and toasts, 14 px popovers. Panels are se
 - Middle: plots stacked on one shared time axis, each with its own header.
 - Analysis (statistics, histogram, spectrum, scatter, events) is a second view, not extra panels on the plots.
 
+### On a phone (up to 820 px wide, or a touch screen)
+
+- The log list leaves the layout and slides over the plots from a menu button, with a scrim behind it. Picking a log closes it.
+- The top bar wraps to two rows: mode switch, Logs and the more menu (icon only) on the first, the channel search on the second.
+- Plots keep a fixed height (at least 220 px) and the list of plots scrolls. A plot's `touch-action` is `pan-y`: vertical swipes scroll the page, sideways drags move the cursor, two fingers pinch and pan, a double tap resets. No gesture needs hover or a right click.
+- With a coarse pointer, controls are at least 44 px and fields use 16 px text so iOS does not zoom the page. Hints name the gesture ("Pinch to zoom") rather than the mouse action.
+- Dialogs and the library fill the width, use `dvh` so the browser bars do not hide their buttons, and respect the safe-area insets.
+
 ## Motion
 
 Only motion that answers an action, about 140 ms. Nothing animates on load. `prefers-reduced-motion` turns it all off.

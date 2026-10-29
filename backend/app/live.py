@@ -31,11 +31,12 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import store
+from .access import require_local
 from .importer import _guess_unit
 
 log = logging.getLogger(__name__)
@@ -531,12 +532,12 @@ def live_status() -> dict:
     return HUB.status()
 
 
-@router.get("/ports")
+@router.get("/ports", dependencies=[Depends(require_local)])
 def live_ports() -> list[dict]:
     return list_ports()
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[Depends(require_local)])
 def live_start(body: StartBody) -> dict:
     try:
         return HUB.start(body.source, body.options, body.keep)
@@ -544,7 +545,7 @@ def live_start(body: StartBody) -> dict:
         raise HTTPException(422, str(e)) from e
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[Depends(require_local)])
 def live_stop() -> dict:
     HUB.stop()
     return HUB.status()

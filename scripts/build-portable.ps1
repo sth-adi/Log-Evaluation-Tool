@@ -64,13 +64,16 @@ Get-ChildItem (Join-Path $app "backend") -Recurse -Directory -Filter "__pycache_
 Remove-Item (Join-Path $app "backend\tests") -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force (Join-Path $app "frontend") | Out-Null
 Copy-Item frontend\dist -Destination (Join-Path $app "frontend") -Recurse
-Copy-Item "Log Evaluation Tool.bat", README.md -Destination $app
+Copy-Item "Log Evaluation Tool.bat", "Log Evaluation Tool (phone).bat", README.md -Destination $app
 @"
 Log Evaluation Tool
 ===================
 1. Unzip this folder anywhere (not inside the zip).
 2. Double-click  "Log Evaluation Tool.bat".  Your browser opens the tool.
 3. Close the small minimised "Log Evaluation Tool" window to stop it.
+
+To use it on a phone on the same Wi-Fi, double-click  "Log Evaluation Tool (phone).bat"  instead and
+scan the QR code it shows. Windows asks once whether Python may use the network: choose Private.
 
 Nothing needs installing. Your logs and library are kept in
 %LOCALAPPDATA%\Log Evaluation Tool  so a new version never loses them.

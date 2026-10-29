@@ -22,6 +22,7 @@ const SOURCES: { id: LiveSourceKind; label: string; help: string }[] = [
 export function Live() {
   const library = useStore((s) => s.library);
   const loadLibrary = useStore((s) => s.loadLibrary);
+  const local = useStore((s) => s.access.local);
   const [status, setStatus] = useState<LiveStatus | null>(null);
   const [kind, setKind] = useState<LiveSourceKind>("simulator");
   const [speed, setSpeed] = useState(1);
@@ -44,8 +45,8 @@ export function Live() {
     void loadLibrary();
     const fail = (what: string) => (e: Error) => setError(`${what}. ${e.message}`);
     api.liveStatus().then(setStatus, fail("Could not read the live status"));
-    api.livePorts().then(setPorts, fail("Could not list the serial ports"));
-  }, [loadLibrary]);
+    if (local) api.livePorts().then(setPorts, fail("Could not list the serial ports"));
+  }, [loadLibrary, local]);
 
   // choose some channels to show as soon as the first data arrives
   useEffect(() => {
@@ -141,7 +142,12 @@ export function Live() {
 
   return (
     <section className="live" aria-label="Live">
-      <div className="live-bar">
+      {!local && (
+        <div className="live-bar">
+          <span className="muted">Live data is started and stopped on the PC that runs the tool. You can watch it from here.</span>
+        </div>
+      )}
+      <div className="live-bar" hidden={!local}>
         <label className="inline">
           Source
           <select value={kind} onChange={(e) => setKind(e.target.value as LiveSourceKind)} disabled={status?.state === "running"}>

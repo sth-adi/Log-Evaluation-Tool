@@ -10,6 +10,7 @@ import { LogDrawer, LogRail } from "./components/LogRail";
 import { Menu } from "./components/Menu";
 import { Palette } from "./components/Palette";
 import { Review } from "./components/Review";
+import { ShareDialog } from "./components/ShareDialog";
 import { Views } from "./components/Views";
 import { extentOf, useStore } from "./store";
 
@@ -33,6 +34,11 @@ export default function App() {
   const view = useStore((s) => s.view);
   const review = useStore((s) => s.review);
   const attention = review ? review.findings.filter((f) => f.severity !== "low").length : 0;
+  const access = useStore((s) => s.access);
+  const loadAccess = useStore((s) => s.loadAccess);
+  const setShareOpen = useStore((s) => s.setShareOpen);
+  const railOpen = useStore((s) => s.railOpen);
+  const setRailOpen = useStore((s) => s.setRailOpen);
   const [dragging, setDragging] = useState(false);
 
   // Open one report per log that has plotted channels, for the zoomed window if there is one.
@@ -55,7 +61,24 @@ export default function App() {
   useEffect(() => {
     void refresh();
     void loadLibrary();
-  }, [refresh, loadLibrary]);
+    void loadAccess();
+  }, [refresh, loadLibrary, loadAccess]);
+
+  // The phone launcher opens the tool at /#phone so the QR code is on screen straight away.
+  useEffect(() => {
+    if (location.hash === "#phone" && access.local && access.sharing) {
+      setShareOpen(true);
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  }, [access, setShareOpen]);
+
+  // Back on a wide screen the log list sits beside the plots again, so forget the slide-over.
+  useEffect(() => {
+    const wide = matchMedia("(min-width: 821px)");
+    const close = () => wide.matches && setRailOpen(false);
+    wide.addEventListener("change", close);
+    return () => wide.removeEventListener("change", close);
+  }, [setRailOpen]);
 
   // "/" or Ctrl+K opens the channel search from anywhere that is not a text box.
   useEffect(() => {
@@ -95,7 +118,7 @@ export default function App() {
 
   return (
     <div
-      className={`app${dragging ? " dragging" : ""}${hasLogs && mode !== "live" ? "" : " bare"}`}
+      className={`app${dragging ? " dragging" : ""}${hasLogs && mode !== "live" ? "" : " bare"}${railOpen ? " rail-open" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -104,6 +127,13 @@ export default function App() {
       onDrop={onDrop}
     >
       <header className="topbar">
+        {hasLogs && mode !== "live" && (
+          <button className="btn icon rail-toggle" onClick={() => setRailOpen(!railOpen)} aria-label="Logs" aria-expanded={railOpen}>
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+              <path d="M3 5h12M3 9h12M3 13h12" />
+            </svg>
+          </button>
+        )}
         <h1>Log Evaluation Tool</h1>
         {hasLogs && (
           <div className="seg" role="tablist" aria-label="View">
@@ -126,7 +156,7 @@ export default function App() {
               <path d="M12 12l4 4" />
             </svg>
             <span>Plot a channel</span>
-            <kbd>/</kbd>
+            <kbd className="kbd-key">/</kbd>
           </button>
         )}
         <div className="spacer" />
@@ -139,11 +169,13 @@ export default function App() {
             { label: "Saved views", note: "Keep or share a set-up", disabled: !hasLogs, onSelect: () => setViewsOpen(true) },
             { label: "Report", note: "Printable page of the plotted channels", disabled: lanes.length === 0, onSelect: openReports },
             { label: "Live data", note: "Follow a car as it runs", onSelect: () => setMode("live") },
+            ...(access.local ? [{ label: "Open on phone", note: "Scan a code to use the tool on your phone", onSelect: () => setShareOpen(true) }] : []),
           ]}
         />
       </header>
 
       {hasLogs && mode !== "live" && <LogRail />}
+      {hasLogs && mode !== "live" && railOpen && <button className="rail-scrim" aria-label="Close the log list" onClick={() => setRailOpen(false)} />}
 
       <main className="stage">
         {mode === "live" ? (
@@ -177,7 +209,7 @@ export default function App() {
               </div>
             )}
             <button className="btn lg" onClick={() => setPalette(true)}>
-              Search all channels <kbd>/</kbd>
+              Search all channels <kbd className="kbd-key">/</kbd>
             </button>
           </div>
         ) : (
@@ -189,7 +221,10 @@ export default function App() {
                 return <Lane key={lane.id} lane={lane} colorOffset={offset} isLast={i === lanes.length - 1} />;
               })}
             </div>
-            <p className="stage-hint">Drag on a plot to zoom. Double-click to see everything again.</p>
+            <p className="stage-hint">
+              <span className="hint-fine">Drag on a plot to zoom. Double-click to see everything again.</span>
+              <span className="hint-coarse">Slide a finger to read values. Pinch to zoom. Double-tap to see everything again.</span>
+            </p>
           </>
         )}
       </main>
@@ -200,6 +235,7 @@ export default function App() {
       <CanDialog />
       <Library />
       <Views />
+      <ShareDialog />
 
       {message && (
         <div className={`toast ${message.kind}`} role={message.kind === "info" ? "status" : "alert"}>

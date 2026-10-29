@@ -10,6 +10,8 @@ export const isLogFile = (f: File) => LOG_EXTENSIONS.includes(f.name.split(".").
 export function ImportButton(props: { className?: string; children: React.ReactNode }) {
   const importFiles = useStore((s) => s.importFiles);
   const input = useRef<HTMLInputElement>(null);
+  // Phone file pickers grey out files they cannot match by type (logs have no known type there), so offer all and check the name.
+  const coarse = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   return (
     <>
       <button className={props.className ?? "btn"} onClick={() => input.current?.click()}>
@@ -18,13 +20,16 @@ export function ImportButton(props: { className?: string; children: React.ReactN
       <input
         ref={input}
         type="file"
-        accept={ACCEPT}
+        accept={coarse ? undefined : ACCEPT}
         multiple
         hidden
         onChange={(e) => {
-          const files = [...(e.target.files ?? [])];
+          const picked = [...(e.target.files ?? [])];
+          const files = picked.filter(isLogFile);
           e.target.value = "";
           if (files.length) void importFiles(files);
+          else if (picked.length)
+            useStore.setState({ message: { kind: "warn", text: "Those are not log files the tool can read (CSV, Excel, Parquet, MDF, CAN)." } });
         }}
       />
     </>

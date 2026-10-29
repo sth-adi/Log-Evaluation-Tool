@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import { api } from "../api";
 import { extentOf, useStore, type Channel, type Lane as LaneModel } from "../store";
 import { spansDays, stamp } from "../time";
+import { attachTouch } from "../touch";
 
 export const TRACE = ["#ffb020", "#38c8f0", "#3ddc84", "#b79bff", "#ff8fb1", "#e8e8e8", "#7fa6ff", "#d6e34a"];
 
@@ -337,7 +338,9 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     const u = new uPlot(opts, empty, el);
     u.setScale("x", { min: initial[0], max: initial[1] });
     plotRef.current = u;
+    const detachTouch = attachTouch(u);
     return () => {
+      detachTouch();
       if (pending != null) cancelAnimationFrame(pending);
       u.destroy();
       plotRef.current = null;
