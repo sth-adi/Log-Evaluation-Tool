@@ -316,6 +316,53 @@ def test_a_single_log_has_no_ties_to_learn():
     assert review.find_ties([_tie_logs(wrong=("b", 30, 34, 0.3))[1]]) == []
 
 
+# --- gear fit ----------------------------------------------------------------------------------
+
+
+def _geared(seed, other=None, off=None):
+    """rpm = speed x 100 in FIRST and x 70 in SECOND. `other` = (from s, to s): rpm fits the other
+    gear there. `off` = (from s, to s): rpm fits neither."""
+    rng = np.random.default_rng(300 + seed)
+    t = np.arange(DUR * RATE) / RATE
+    speed = 45 + 12 * np.sin(t / 3)
+    gear = np.where(t < 40, 0.0, 1.0)
+    ratio = np.where(gear == 0, 100.0, 70.0)
+    for win, val in ((other, None), (off, 0.5)):
+        if win:
+            m = (t >= win[0]) & (t < win[1])
+            ratio = np.where(m, (np.where(gear == 0, 70.0, 100.0) if val is None else ratio * val), ratio)
+    rpm = speed * ratio * (1 + rng.normal(0, 0.003, t.size))
+    log = make_log(seed, extra={"rpm": rpm, "vehicleSpeed": speed, "gear": gear})
+    log.meta["gear"] = {"states": {"0": "FIRST", "1": "SECOND"}}
+    return log
+
+
+def test_a_gear_that_disagrees_with_rpm_and_speed_is_flagged():
+    logs = [_geared(1), _geared(2, other=(15, 19)), _geared(3)]
+    f = kinds(review.evaluate(logs), "gear")
+    assert [x["key"] for x in f] == ["gear:FIRST>SECOND"]
+    assert "Gear says FIRST" in f[0]["title"] and f[0]["occurrences"][0]["log_id"] == "l2"
+    assert 14.5 < f[0]["occurrences"][0]["t0"] < 16 and 18 < f[0]["occurrences"][0]["t1"] < 19.5
+
+
+def test_a_ratio_that_fits_no_gear_is_flagged_and_far_off_says_the_speed_may_not_be_road_speed():
+    f = kinds(review.evaluate([_geared(1), _geared(2, off=(55, 62)), _geared(3)]), "gear")
+    assert [x["key"] for x in f] == ["gear:SECOND:off"]
+    assert "not road speed" in f[0]["detail"]
+
+
+def test_gears_that_all_fit_give_nothing():
+    assert kinds(review.evaluate([_geared(1), _geared(2), _geared(3)]), "gear") == []
+
+
+def test_the_moment_of_a_gear_change_is_left_out():
+    logs = [_geared(i) for i in (1, 2, 3)]
+    for l in logs:  # rpm lags the change by 0.4 s
+        i = 40 * RATE
+        l.cols["rpm"][i : i + int(0.4 * RATE)] = l.cols["vehicleSpeed"][i : i + int(0.4 * RATE)] * 100
+    assert kinds(review.evaluate(logs), "gear") == []
+
+
 def test_one_log_has_nothing_to_be_compared_with():
     assert [f for f in review.evaluate([_drive(1, "2025-11-19T11:00:00")])["findings"] if f["kind"] == "drift"] == []
 

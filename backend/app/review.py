@@ -12,6 +12,9 @@ across the logs, not for values past a limit someone typed in:
 * **ties**: channels that follow each other in every log (two rpm sensors, the cylinders of one
   bank, a base and a final value), and the stretches where one of them stops following. When more
   than two are tied, the one that departs from all its partners is named.
+* **gear fit**: in each gear rpm and road speed keep one ratio. The ratios are learned from the logs
+  where a gear holds steady, then every moment is checked: does the gear channel say the gear that
+  the rpm and speed fit, or another, or none?
 * **stuck sensors**: a channel that moves in other logs but is flat for a whole run.
 * **dropouts**: channels or whole logs that go quiet for a while.
 
@@ -69,6 +72,13 @@ TIE_LAG_S = 0.5  # a sensor that lags its partner by up to this long is not a br
 TIE_MIN_S = 1.0  # the break lasts at least this long
 TIE_MAX_SHARE = 0.10  # a "tie" that fails more than this share of the time is not a tie
 MAX_TIES = 400
+GEAR_TIGHT = 0.7  # a gear has a ratio in a log when this share of its samples sit within GEAR_BAND of one value
+GEAR_BAND = 0.05
+GEAR_OTHER = 0.04  # the ratio fits another gear when it is this close to that gear's
+GEAR_MIN_S = 3.0  # and the gear was held at least this long in the log
+GEAR_HOLD_S = 0.5  # time after a gear change that is left out
+SPEED = re.compile(r"^vehicleSpeed$", re.I)
+NEUTRAL = re.compile(r"neutral|^n$", re.I)
 TIE_ODD = 0.6  # one channel is the odd one out when it breaks with this share of its partners
 MAX_TIE_FINDINGS = 8
 
@@ -1054,6 +1064,110 @@ def find_ties(logs: list[Log]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------------------------
+# gear fit: does the gear channel agree with rpm and road speed?
+
+
+def _gear_key(l: Log, v: float) -> str:
+    return l.state_label("gear", v) or f"gear {int(round(v))}"
+
+
+def find_gear_fit(logs: list[Log]) -> list[dict]:
+    """In every gear rpm divided by road speed is one number. Learn it where the gear holds steady
+    (most of the log, within 5%), then flag the stretches where the gear channel says one gear and
+    the ratio fits another, or none at all (a slipping clutch, a speed channel that is wrong)."""
+    cars = [l for l in logs if "gear" in l.cols and "rpm" in l.cols and any(SPEED.match(k) for k in l.cols)]
+    if not cars:
+        return []
+    speed_name = {l.id: next(k for k in l.cols if SPEED.match(k)) for l in cars}
+    top = float(np.nanmax([np.nanpercentile(l.cols[speed_name[l.id]], 99) for l in cars]))
+    if not np.isfinite(top) or top <= 0:
+        return []
+    per_log: dict[str, dict] = {}
+    for l in cars:
+        v, g, r = l.cols[speed_name[l.id]], l.cols["gear"], l.cols["rpm"]
+        raw = np.where(v > 0, r / np.where(v > 0, v, np.nan), np.nan)
+        ratio = pd.Series(raw).rolling(max(1, int(0.2 * l.rate)), center=True, min_periods=1).median().to_numpy()
+        change = np.zeros(l.n, bool)
+        hold = int(GEAR_HOLD_S * l.rate)
+        for i in np.flatnonzero(np.diff(np.nan_to_num(g, nan=-1)) != 0):
+            change[max(0, i - hold) : i + hold + 1] = True
+        usable = _settled(l) & np.isfinite(ratio) & np.isfinite(g) & (v > 0.05 * top) & ~change
+        label = np.array([_gear_key(l, x) if np.isfinite(x) else "" for x in g], dtype=object)
+        per_log[l.id] = {"ratio": ratio, "usable": usable, "label": label}
+    # the ratio of each gear: pooled over the logs in which the gear holds one value
+    pool: dict[str, list[float]] = {}
+    for l in cars:
+        d = per_log[l.id]
+        for name in set(d["label"][d["usable"]]):
+            if NEUTRAL.search(name):
+                continue
+            x = d["ratio"][d["usable"] & (d["label"] == name)]
+            if x.size < GEAR_MIN_S * l.rate:
+                continue
+            hist, edges = np.histogram(x, bins=np.linspace(np.percentile(x, 1), np.percentile(x, 99) + 1e-9, 60))
+            mode = float((edges[hist.argmax()] + edges[hist.argmax() + 1]) / 2)
+            if mode > 0 and float((np.abs(x / mode - 1) < GEAR_BAND).mean()) >= GEAR_TIGHT:
+                pool.setdefault(name, []).append(mode)
+    refs = {k: float(np.median(v)) for k, v in pool.items()}
+    if not refs:
+        return []
+    names = list(refs)
+    ref = np.array([refs[k] for k in names])
+    found: dict[str, dict] = {}
+    for l in cars:
+        d = per_log[l.id]
+        ratio, usable, label = d["ratio"], d["usable"], d["label"]
+        own = np.array([names.index(k) if k in refs else -1 for k in label])
+        dev = np.abs(ratio[:, None] / ref[None, :] - 1)
+        best = dev.argmin(1)
+        near = dev.min(1)
+        own_dev = dev[np.arange(l.n), np.maximum(own, 0)]
+        for kind in ("other", "none"):
+            if kind == "other":
+                bad = usable & (own >= 0) & (own != best) & (near < GEAR_OTHER)
+            else:
+                bad = usable & (own >= 0) & (own_dev >= GEAR_BAND) & (near >= GEAR_OTHER)
+            for s0, s1 in _merge(_runs(bad), int(0.3 * l.rate)):
+                if s1 - s0 < l.rate:
+                    continue
+                said = str(label[s0 + (s1 - s0) // 2])
+                if kind == "other":
+                    actual = names[int(np.bincount(best[s0:s1]).argmax())]
+                    key, note = f"gear:{said}>{actual}", f"gear said {said}, rpm and speed fit {actual}"
+                else:
+                    actual = None
+                    key = f"gear:{said}:off"
+                    note = f"in {said} rpm per speed was {_num(float(np.median(ratio[s0:s1])))}, usually {_num(refs[said])}"
+                g_ = found.setdefault(key, {"said": said, "kind": kind, "actual": actual, "occ": [], "secs": 0.0, "speed": speed_name[l.id], "far": 0.0})
+                if kind == "none":
+                    g_["far"] = max(g_["far"], abs(float(np.median(ratio[s0:s1])) / refs[said] - 1))
+                g_["occ"].append(_occ(l, s0, s1, note))
+                g_["secs"] += (s1 - s0) / l.rate
+    findings = []
+    for key, g_ in sorted(found.items(), key=lambda kv: -kv[1]["secs"])[:MAX_TIE_FINDINGS]:
+        if g_["kind"] == "other":
+            title = f"Gear says {g_['said']}, but rpm and speed fit {g_['actual']}"
+            detail = (
+                f"In {g_['said']} the rpm per unit of speed is one number (about {_num(refs[g_['said']])}); for these stretches it matched "
+                f"{g_['actual']} ({_num(refs[g_['actual']])}). Either the gear channel was wrong or the car was in another gear than it reported."
+            )
+        else:
+            title = f"rpm and speed do not fit {g_['said']} for a while"
+            detail = (
+                f"In {g_['said']} the rpm per unit of speed is about {_num(refs[g_['said']])}; for these stretches it fit no gear. "
+                + (
+                    "That is too far off for a slipping clutch: the speed channel is probably not road speed here (a dyno roller, for example)."
+                    if g_["far"] > 0.25
+                    else "That is a slipping clutch, a wheel that is not driven, or a speed channel that is off."
+                )
+            )
+        findings.append(
+            _finding(key=key, kind="gear", severity="medium", title=title, detail=detail, channels=["gear", "rpm", g_["speed"]], occurrences=g_["occ"])
+        )
+    return findings
+
+
+# ---------------------------------------------------------------------------------------------
 # putting it together
 
 
@@ -1066,7 +1180,7 @@ def evaluate(logs: list[Log], limits: list[dict] | None = None) -> dict:
         notes.append("No rpm channel, so every sample counts as engine running.")
     if len(logs) < 2:
         notes.append("Only one log is open. Checks that compare logs (stuck sensors, links) get stronger with more.")
-    for check in (find_links, find_self_reports, find_drift, find_ties, find_stuck, find_unused, find_dropouts):
+    for check in (find_links, find_self_reports, find_drift, find_ties, find_gear_fit, find_stuck, find_unused, find_dropouts):
         findings += check(logs)
     lim, lim_notes = find_limit_breaches(logs, limits or [])
     findings += lim
