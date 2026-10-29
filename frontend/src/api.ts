@@ -24,7 +24,7 @@ export type Severity = "high" | "medium" | "low";
 export type ReviewOcc = { log_id: string; label: string; t0: number; t1: number; note: string; fits?: boolean };
 export type Finding = {
   key: string;
-  kind: "link" | "report" | "drift" | "stuck" | "unused" | "dropout" | "gap" | "limit";
+  kind: "link" | "report" | "drift" | "tie" | "stuck" | "unused" | "dropout" | "gap" | "limit";
   severity: Severity;
   title: string;
   detail: string;

@@ -9,6 +9,9 @@ across the logs, not for values past a limit someone typed in:
   another channel, and the times it was not. The links are found from the data; the misses are the
   findings, with the one condition they have in common when there is one.
 * **self-reports**: the ECU's own fault, limp and diagnostic channels, only while the engine runs.
+* **ties**: channels that follow each other in every log (two rpm sensors, the cylinders of one
+  bank, a base and a final value), and the stretches where one of them stops following. When more
+  than two are tied, the one that departs from all its partners is named.
 * **stuck sensors**: a channel that moves in other logs but is flat for a whole run.
 * **dropouts**: channels or whole logs that go quiet for a while.
 
@@ -58,6 +61,16 @@ MAX_DRIFT = 8
 TEMPERATURE = re.compile(r"°\s*C|deg\s*C|^C$", re.I)
 GEAR = re.compile(r"^gear$", re.I)
 THROTTLE = re.compile(r"^(tps\d?|throttle\w*)$", re.I)
+
+TIE_CORR = 0.97  # two channels are tied when they correlate at least this well, the same way, in every log
+TIE_SIGMA = 6.0  # they have stopped following when they differ by this many times their usual scatter ...
+TIE_FLOOR = 0.03  # ... and by at least this fraction of the channel's range
+TIE_LAG_S = 0.5  # a sensor that lags its partner by up to this long is not a break
+TIE_MIN_S = 1.0  # the break lasts at least this long
+TIE_MAX_SHARE = 0.10  # a "tie" that fails more than this share of the time is not a tie
+MAX_TIES = 400
+TIE_ODD = 0.6  # one channel is the odd one out when it breaks with this share of its partners
+MAX_TIE_FINDINGS = 8
 
 SELF_REPORT = re.compile(r"fault|fail|limp|warn|alarm|diag", re.I)
 SERIOUS = re.compile(r"fault|fail|limp", re.I)
@@ -851,6 +864,196 @@ def find_drift(logs: list[Log]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------------------------
+# ties: channels that follow each other, and the stretches where one stops
+
+
+def _settled(log: Log) -> np.ndarray:
+    """Running samples without the first second of each run: cranking and the log's own start-up
+    move everything at once and say nothing about whether two channels agree."""
+    ok = log.running() & (log.t - log.t[0] >= SETTLE_S)
+    out = ok.copy()
+    k = max(1, int(round(log.rate)))
+    for a, b in _runs(ok):
+        out[a : min(a + k, b)] = False
+    return out
+
+
+def _tied_pairs(logs: list[Log], names: list[str], ok: dict[str, np.ndarray]) -> list[tuple[int, int]]:
+    """Index pairs of ``names`` that correlate at least TIE_CORR, with one sign, in every log that
+    has both and in at least two logs. Strongest first."""
+    n = len(names)
+    stack = np.full((len(logs), n, n), np.nan)
+    for li, l in enumerate(logs):
+        rows = [i for i, c in enumerate(names) if c in l.cols]
+        m = ok[l.id]
+        if len(rows) < 2 or m.sum() < 200:
+            continue
+        mat = np.vstack([_fill(l.cols[names[i]])[m] for i in rows])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            c = np.corrcoef(mat)
+        stack[li][np.ix_(rows, rows)] = c
+    have = (~np.isnan(stack)).sum(0)
+    lo = np.where(np.isnan(stack), 2.0, stack).min(0)
+    hi = np.where(np.isnan(stack), -2.0, stack).max(0)
+    strength = np.where(lo >= TIE_CORR, lo, np.where(hi <= -TIE_CORR, -hi, 0.0))
+    iu = np.triu_indices(n, 1)
+    keep = (strength[iu] > 0) & (have[iu] >= 2)
+    pairs = sorted(zip(iu[0][keep], iu[1][keep]), key=lambda ij: -strength[ij])
+    return [(int(i), int(j)) for i, j in pairs[:MAX_TIES]]
+
+
+def find_ties(logs: list[Log]) -> list[dict]:
+    """Channels that follow each other in every log, and where one of them stops following.
+    Nothing says which pairs to watch: they are the ones that agree almost all the time."""
+    if len(logs) < 2:
+        return []
+    ok = {l.id: _settled(l) for l in logs}
+    names = []
+    for c in sorted({c for l in logs for c in l.cols}):
+        have = [l for l in logs if c in l.cols]
+        if len(have) < 2 or _discrete(logs, c) or any(_accumulates(l.cols[c]) for l in have):
+            continue
+        if all(_finite(l.cols[c][ok[l.id]]).size >= 200 and np.ptp(_finite(l.cols[c][ok[l.id]])) > 0 for l in have):
+            names.append(c)
+    if len(names) < 2:
+        return []
+
+    # rolling extremes of every channel, so a sensor that lags its partner is not a break
+    env: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
+
+    def envelope(l: Log, c: str) -> tuple[np.ndarray, np.ndarray]:
+        e = env.get((l.id, c))
+        if e is None:
+            w = 2 * max(1, int(TIE_LAG_S * l.rate)) + 1
+            r = pd.Series(l.cols[c]).rolling(w, center=True, min_periods=1)
+            e = env[(l.id, c)] = (r.min().to_numpy(), r.max().to_numpy())
+        return e
+
+    ties: dict[tuple[str, str], dict] = {}
+    degree: dict[str, int] = {}
+    for i, j in _tied_pairs(logs, names, ok):
+        a, b = names[i], names[j]
+        both = [l for l in logs if a in l.cols and b in l.cols]
+        use = {l.id: ok[l.id] & np.isfinite(l.cols[a]) & np.isfinite(l.cols[b]) for l in both}
+        X = np.concatenate([l.cols[a][use[l.id]] for l in both])
+        Y = np.concatenate([l.cols[b][use[l.id]] for l in both])
+        if X.size < 200:
+            continue
+        k, c0 = np.polyfit(X, Y, 1)
+        for _ in range(3):  # fit the way the two agree, not the way they sometimes do not
+            r = np.abs(Y - (k * X + c0))
+            keep = r <= np.percentile(r, 95)
+            k, c0 = np.polyfit(X[keep], Y[keep], 1)
+        r = Y - (k * X + c0)
+        sig = 1.4826 * float(np.median(np.abs(r - np.median(r))))
+        lo, hi = np.percentile(Y, [1, 99])
+        span = float(hi - lo)
+        if span <= 0:
+            continue
+        tol = max(TIE_SIGMA * sig, TIE_FLOOR * span)
+        runs, bad_n, all_n = [], 0, 0
+        for l in both:
+            emin, emax = envelope(l, a)
+            lo_y, hi_y = (k * emin + c0, k * emax + c0) if k >= 0 else (k * emax + c0, k * emin + c0)
+            y = l.cols[b]
+            dist = np.maximum(np.maximum(y - hi_y, lo_y - y), 0.0)
+            bad = (dist > tol) & use[l.id]
+            bad_n += int(bad.sum())
+            all_n += int(use[l.id].sum())
+            for s0, s1 in _merge(_runs(bad), int(0.5 * l.rate)):
+                if s1 - s0 >= TIE_MIN_S * l.rate:
+                    runs.append((l, s0, s1, float(dist[s0:s1].max())))
+        if all_n == 0 or bad_n / all_n > TIE_MAX_SHARE:
+            continue
+        ties[(a, b)] = {"k": float(k), "sig": sig, "span": span, "runs": runs}
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+
+    # breaks of different pairs that overlap in time belong together: who is the odd one out?
+    events = sorted(
+        ((l.id, s0, s1, pair, dist) for pair, t in ties.items() for (l, s0, s1, dist) in t["runs"]),
+        key=lambda e: (e[0], e[1]),
+    )
+    by_log = {l.id: l for l in logs}
+    clusters: list[list] = []
+    for e in events:
+        if clusters and clusters[-1][0][0] == e[0] and e[1] <= max(x[2] for x in clusters[-1]):
+            clusters[-1].append(e)
+        else:
+            clusters.append([e])
+
+    found: dict[str, dict] = {}
+    for cl in clusters:
+        l = by_log[cl[0][0]]
+        pairs = {e[3] for e in cl}
+        broken: dict[str, int] = {}
+        for x, y in pairs:
+            broken[x] = broken.get(x, 0) + 1
+            broken[y] = broken.get(y, 0) + 1
+        share = sorted(((n / degree[c], c) for c, n in broken.items() if n >= 2), reverse=True)
+        # the odd one out breaks with most of the channels it is tied to, and the others do not
+        odd = [share[0][1]] if share and share[0][0] >= TIE_ODD and (len(share) < 2 or share[1][0] <= share[0][0] - 0.25) else []
+        s0, s1 = min(e[1] for e in cl), max(e[2] for e in cl)
+        tight = lambda p: ties[p]["sig"] / ties[p]["span"]  # noqa: E731
+        size = max(max(e[4] for e in cl if e[3] == p) / ties[p]["span"] for p in pairs)
+        if len(odd) == 1:
+            c = odd[0]
+            mine = sorted((p for p in pairs if c in p), key=tight)
+            best = mine[0]
+            partner = best[1] if best[0] == c else best[0]
+            worst = max(e[4] for e in cl if e[3] == best)
+            gain = abs(ties[best]["k"])
+            away = worst if best[1] == c else worst / gain if gain else worst
+            unit = l.unit(c)
+            key, lead = f"tie:{c}", c
+            note = f"{c} was up to {_num(away)}{' ' + unit if unit else ''} away from where {partner} puts it"
+            partners = [p[0] if p[1] == c else p[1] for p in mine]  # tightest tie first
+            chans = [c, *partners[:2]]
+        else:
+            best = min(pairs, key=tight)
+            a, b = best
+            worst = max(e[4] for e in cl if e[3] == best)
+            unit = l.unit(b)
+            key, lead = f"tie:{a}+{b}", None
+            note = f"{a} and {b} differed by up to {_num(worst)}{' ' + unit if unit else ''} from how they usually agree"
+            partners, chans = [], [a, b]
+        g = found.setdefault(key, {"lead": lead, "chans": chans, "partners": partners, "occ": [], "size": 0.0, "pairs": set()})
+        g["size"] = max(g["size"], size)
+        g["pairs"] |= pairs
+        g["occ"].append(_occ(l, s0, s1, note))
+    findings = []
+    for key, g in sorted(found.items(), key=lambda kv: -kv[1]["size"])[:MAX_TIE_FINDINGS]:
+        if g["lead"]:
+            c = g["lead"]
+            others = ", ".join(g["partners"][:3]) + (f" and {len(g['partners']) - 3} more" if len(g["partners"]) > 3 else "")
+            title = f"{c} stopped following {g['partners'][0]}" + (f" and {len(g['partners']) - 1} other channel{'s' if len(g['partners']) > 2 else ''}" if len(g["partners"]) > 1 else "")
+            detail = (
+                f"{c} moves with {others} in every log, and for these stretches it did not, while the channels it usually agrees with "
+                "kept agreeing with each other. A sensor drifting away from its twin, a value that is clamped, or a mode that changes "
+                "how they relate all look like this; the data cannot say which one is wrong."
+            )
+        else:
+            a, b = g["chans"]
+            title = f"{a} and {b} stopped agreeing"
+            detail = (
+                f"{a} and {b} move together in every log, and for these stretches they did not. The data cannot say which of the two is "
+                "wrong, or whether something changes how they relate."
+            )
+        findings.append(
+            _finding(
+                key=key,
+                kind="tie",
+                severity="medium" if g["size"] >= 0.1 else "low",
+                title=title,
+                detail=detail,
+                channels=g["chans"],
+                occurrences=g["occ"],
+            )
+        )
+    return findings
+
+
+# ---------------------------------------------------------------------------------------------
 # putting it together
 
 
@@ -863,7 +1066,7 @@ def evaluate(logs: list[Log], limits: list[dict] | None = None) -> dict:
         notes.append("No rpm channel, so every sample counts as engine running.")
     if len(logs) < 2:
         notes.append("Only one log is open. Checks that compare logs (stuck sensors, links) get stronger with more.")
-    for check in (find_links, find_self_reports, find_drift, find_stuck, find_unused, find_dropouts):
+    for check in (find_links, find_self_reports, find_drift, find_ties, find_stuck, find_unused, find_dropouts):
         findings += check(logs)
     lim, lim_notes = find_limit_breaches(logs, limits or [])
     findings += lim

@@ -259,6 +259,63 @@ def test_a_timer_that_updates_in_a_few_steps_is_still_an_accumulator():
     assert [f for f in review.evaluate(logs)["findings"] if f["kind"] == "drift" and f["channels"] == ["onLoadTime"]] == []
 
 
+# --- ties --------------------------------------------------------------------------------------
+
+
+def _twins(seed, n=3, lag=0.0, wrong=None, scale=1.0):
+    """Three sensors on one quantity, as a log would carry them. `wrong` = (sensor, from s, to s,
+    fraction): that sensor reads off by that fraction of the signal for that long."""
+    rng = np.random.default_rng(100 + seed)
+    t = np.arange(DUR * RATE) / RATE
+    base = 3000 + 1500 * np.sin(t / 4) + 600 * np.sin(t / 1.3)
+    cols = {}
+    for k, name in enumerate("abc"[:n]):
+        src = np.interp(t - (lag if name == "c" else 0.0), t, base)
+        x = scale * src + rng.normal(0, 8, t.size)
+        if wrong and wrong[0] == name:
+            x[int(wrong[1] * RATE) : int(wrong[2] * RATE)] += wrong[3] * 3000
+        cols[name] = x
+    return cols
+
+
+def _tie_logs(**kw):
+    return [make_log(i, extra=_twins(i, **(kw if i == 2 else {k: v for k, v in kw.items() if k != "wrong"}))) for i in (1, 2, 3)]
+
+
+def test_the_sensor_that_leaves_its_twins_is_named():
+    f = kinds(review.evaluate(_tie_logs(wrong=("b", 30, 34, 0.3))), "tie")
+    assert [x["key"] for x in f] == ["tie:b"]
+    assert f[0]["title"].startswith("b stopped following") and f[0]["channels"][0] == "b"
+    assert f[0]["count"] == 1 and f[0]["occurrences"][0]["log_id"] == "l2"
+    assert 29.5 < f[0]["occurrences"][0]["t0"] < 31 and 33 < f[0]["occurrences"][0]["t1"] < 34.5
+
+
+def test_a_sensor_that_lags_its_twin_is_not_a_break():
+    assert kinds(review.evaluate(_tie_logs(lag=0.3)), "tie") == []
+
+
+def test_two_channels_that_stop_agreeing_are_named_together():
+    f = kinds(review.evaluate(_tie_logs(n=2, wrong=("b", 30, 34, 0.3))), "tie")
+    assert [x["key"] for x in f] == ["tie:a+b"]
+    assert "stopped agreeing" in f[0]["title"]
+
+
+def test_a_short_blip_is_not_a_break():
+    assert kinds(review.evaluate(_tie_logs(wrong=("b", 30, 30.4, 0.3))), "tie") == []
+
+
+def test_a_difference_inside_the_usual_scatter_is_not_a_break():
+    assert kinds(review.evaluate(_tie_logs(wrong=("b", 30, 34, 0.01))), "tie") == []
+
+
+def test_channels_that_often_disagree_are_not_tied():
+    assert kinds(review.evaluate(_tie_logs(wrong=("b", 10, 60, 0.3))), "tie") == []
+
+
+def test_a_single_log_has_no_ties_to_learn():
+    assert review.find_ties([_tie_logs(wrong=("b", 30, 34, 0.3))[1]]) == []
+
+
 def test_one_log_has_nothing_to_be_compared_with():
     assert [f for f in review.evaluate([_drive(1, "2025-11-19T11:00:00")])["findings"] if f["kind"] == "drift"] == []
 
