@@ -28,6 +28,9 @@ export function Review() {
             {n}
           </p>
         ))}
+        <a className="btn sm" href="/api/review/report" target="_blank" rel="noreferrer" title="One page with every finding and a plot of each, to print or send">
+          Open as a report
+        </a>
       </header>
 
       {attention.map((f) => (

@@ -19,6 +19,7 @@ export function Views() {
   const saveView = useStore((s) => s.saveView);
   const openView = useStore((s) => s.openView);
   const deleteView = useStore((s) => s.deleteView);
+  const setViewAuto = useStore((s) => s.setViewAuto);
   const importViewFile = useStore((s) => s.importViewFile);
   const [name, setName] = useState("");
   const [sure, setSure] = useState<string | null>(null);
@@ -83,6 +84,14 @@ export function Views() {
               <span className="lib-act">
                 <button className="btn sm" onClick={() => openView(v)}>
                   Open
+                </button>
+                <button
+                  className={`btn sm ghost${v.auto ? " on" : ""}`}
+                  aria-pressed={!!v.auto}
+                  onClick={() => void setViewAuto(v.id, !v.auto)}
+                  title="Open this view by itself when you add a log to an empty screen"
+                >
+                  {v.auto ? "Opens by itself" : "Open by itself"}
                 </button>
                 <button className="btn sm ghost" onClick={() => download(v)} title="Save this view as a file to share">
                   Export

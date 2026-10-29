@@ -462,3 +462,35 @@ def test_the_result_follows_the_open_logs(client):
     assert client.get("/api/review").json()["checked"]["logs"] == 2
     assert client.post(f"/api/library/{first['id']}/close").status_code == 200
     assert client.get("/api/review").json()["checked"]["logs"] == 1
+
+
+def test_the_review_report_is_one_page_with_the_findings_and_a_plot(client):
+    for lg in [make_log(1, dropped=(34,)), make_log(2), make_log(3), make_log(4)]:
+        _upload(client, lg)
+    page = client.get("/api/review/report")
+    assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
+    html = page.text
+    assert "Review report" in html and "4 logs" in html
+    assert "req" in html and "<svg" in html  # the link finding, with a plot of its first occurrence
+    assert "<script" not in html
+
+
+def test_the_review_report_plots_logs_that_start_late_on_the_shared_timeline(client):
+    ids = [_upload(client, lg)["id"] for lg in [make_log(1, dropped=(34,)), make_log(2), make_log(3), make_log(4)]]
+    for k, i in enumerate(ids):
+        assert client.patch(f"/api/sources/{i}", json={"offset_s": 500.0 * k}).status_code == 200
+    html = client.get("/api/review/report").text
+    assert client.get("/api/review/report").status_code == 200 and "<svg" in html
+
+
+def test_the_review_report_leaves_out_what_was_marked_normal(client):
+    for i in range(1, 4):
+        _upload(client, make_log(i))
+    link = next(f for f in client.get("/api/review").json()["findings"] if f["kind"] == "link")
+    client.post("/api/review/mute", params={"key": link["key"]})
+    html = client.get("/api/review/report").text
+    assert link["title"] not in html and "marked as normal" in html
+
+
+def test_the_review_report_with_no_logs_says_nothing_was_found(client):
+    assert "found nothing" in client.get("/api/review/report").text

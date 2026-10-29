@@ -75,7 +75,7 @@ export type ViewPayload = {
   lanes: string[][];
   lap: { params: LapParams; axis: "distance" | "time" };
 };
-export type SavedView = { id: string; name: string; saved_at: string; payload: ViewPayload };
+export type SavedView = { id: string; name: string; saved_at: string; payload: ViewPayload; auto?: boolean };
 
 export type LaneSeries = { sourceId: string; channel: string };
 export type Lane = { id: number; series: LaneSeries[] };
@@ -129,6 +129,7 @@ type State = {
   loadViews: () => Promise<void>;
   saveView: (name: string) => Promise<boolean>;
   openView: (v: SavedView) => void;
+  setViewAuto: (id: string, on: boolean) => Promise<void>;
   deleteView: (id: string) => Promise<void>;
   importViewFile: (file: File) => Promise<void>;
   mode: "plots" | "review" | "analyse" | "live";
@@ -139,6 +140,7 @@ type State = {
   restoreFinding: (key: string) => Promise<void>;
   saveLimits: (limits: Limit[]) => Promise<boolean>;
   openFinding: (f: Finding, o: ReviewOcc) => void;
+  focus: [number, number] | null; // the stretch a finding points at, shaded on every plot
   tool: ToolId | null; // the open tool under Analyse, or null for the list of tools
   setTool: (t: ToolId | null) => void;
   view: [number, number] | null; // null = full extent
@@ -288,6 +290,14 @@ export const useStore = create<State>((set, get) => ({
       },
     });
   },
+  setViewAuto: async (id, on) => {
+    try {
+      await api.setViewAuto(id, on);
+      await get().loadViews();
+    } catch (e) {
+      set({ message: { kind: "error", text: (e as Error).message } });
+    }
+  },
   deleteView: async (id) => {
     try {
       await api.deleteView(id);
@@ -358,9 +368,11 @@ export const useStore = create<State>((set, get) => ({
     const pad = Math.max(1.5, (o.t1 - o.t0) * 0.5);
     set({
       mode: "plots",
+      focus: [src.offset_s + o.t0, src.offset_s + Math.max(o.t1, o.t0)],
       view: [src.offset_s + Math.max(o.t0 - pad, 0), src.offset_s + Math.min(o.t1 + pad, src.duration_s)],
     });
   },
+  focus: null,
   tool: null,
   setTool: (tool) => set({ tool, mode: "analyse" }),
   library: [],
@@ -565,6 +577,15 @@ export const useStore = create<State>((set, get) => ({
       }
     }
     await get().refresh();
+    // a new log on an empty screen opens in the view marked to open by itself
+    if (files.length && get().lanes.length === 0) {
+      try {
+        const auto = (await api.views()).find((v) => v.auto);
+        if (auto) get().openView(auto);
+      } catch {
+        /* the log is open either way; the views list reports its own errors */
+      }
+    }
   },
 
   setOffset: async (id, offset) => {
@@ -665,7 +686,7 @@ export const useStore = create<State>((set, get) => ({
     }),
 
   removeLane: (id) => set((s) => ({ lanes: s.lanes.filter((l) => l.id !== id) })),
-  setView: (view) => set({ view }),
+  setView: (view) => set(view ? { view } : { view, focus: null }),
   clearMessage: () => set({ message: null }),
 }));
 

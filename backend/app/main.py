@@ -427,6 +427,35 @@ def get_review() -> dict:
     return review.run()
 
 
+@app.get("/api/review/report", response_class=HTMLResponse)
+def review_report() -> HTMLResponse:
+    """The findings of the review as one self-contained page: details, where they happened, and a plot of each."""
+    result = review.run()
+    sources = store.list_sources()
+    plots: dict[str, list] = {}
+    for f in [x for x in result["findings"] if x["severity"] != "low"][:10]:
+        o = f["occurrences"][0] if f["occurrences"] else None
+        src = next((s for s in sources if o and s["id"] == o["log_id"]), None)
+        if not o or not src:
+            continue
+        pad = max(2.0, (o["t1"] - o["t0"]) * 0.5)
+        off = src.get("offset_s", 0.0)  # occurrences are in the log's own time, the window in the shared one
+        x0, x1 = max(o["t0"] - pad, 0.0), min(o["t1"] + pad, src["duration_s"])
+        have = {c["name"] for c in src["channels"]}
+        names = [c for c in f["channels"] if c in have][:2]
+        if not names or x1 <= x0:
+            continue
+        t, arr = _window(src["id"], names, off + x0, off + x1)
+        band = [{"t_start": o["t0"], "t_end": o["t1"]}]
+        unit = {c["name"]: c["unit"] for c in src["channels"]}
+        plots[f["key"]] = []
+        for i, c in enumerate(names):
+            tt, yy, _ = minmax_downsample(t, arr[c], off + x0, off + x1, 900)
+            group = [(c, unit.get(c, ""), tt - off, yy)]
+            plots[f["key"]].append((group, report.plot_svg(group, x0, x1, band, i == len(names) - 1)))
+    return HTMLResponse(report.render_review(result, sources, plots))
+
+
 @app.post("/api/review/mute")
 def mute_finding(key: str = Query(..., min_length=1, max_length=300)) -> dict:
     review.mute(key)
@@ -589,6 +618,18 @@ def save_view(body: ViewBody) -> dict:
         return workspaces.save(body.name, body.payload)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+
+
+class AutoBody(BaseModel):
+    on: bool
+
+
+@app.put("/api/workspaces/{view_id}/auto", status_code=204)
+def set_view_auto(view_id: str, body: AutoBody) -> None:
+    try:
+        workspaces.set_auto(view_id, body.on)
+    except KeyError:
+        raise HTTPException(404, "unknown view") from None
 
 
 @app.delete("/api/workspaces/{view_id}", status_code=204)

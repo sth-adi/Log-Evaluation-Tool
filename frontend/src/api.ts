@@ -275,6 +275,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, payload }),
     }).then((r) => parse<SavedView>(r)),
+  setViewAuto: (id: string, on: boolean) =>
+    fetch(`/api/workspaces/${id}/auto`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on }),
+    }).then((r) => parse<void>(r)),
   deleteView: (id: string) => fetch(`/api/workspaces/${id}`, { method: "DELETE" }).then((r) => parse<void>(r)),
 
   laps: (id: string, p: LapParams) => getJson<LapTable>(`/api/sources/${id}/laps`, lapQuery(p)),

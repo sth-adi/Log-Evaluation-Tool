@@ -49,9 +49,24 @@ def save(name: str, payload: dict) -> dict:
         "name": name,
         "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "payload": payload,
+        "auto": bool(existing and existing.get("auto")),
     }
     (_dir() / f"{rec['id']}.json").write_text(json.dumps(rec), encoding="utf-8")
     return rec
+
+
+def set_auto(view_id: str, on: bool) -> None:
+    """Mark one view as the one to open when a log is imported into an empty screen (or clear it)."""
+    if not _ID.match(view_id):
+        raise KeyError(view_id)
+    f = _dir() / f"{view_id}.json"
+    if not f.is_file():
+        raise KeyError(view_id)
+    for w in list_all():
+        want = on if w["id"] == view_id else False
+        if bool(w.get("auto")) != want:
+            w["auto"] = want
+            (_dir() / f"{w['id']}.json").write_text(json.dumps(w), encoding="utf-8")
 
 
 def delete(view_id: str) -> None:

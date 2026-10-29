@@ -141,3 +141,67 @@ def render(
 <p class="note">Mean is time-weighted.</p>
 <h2>Events</h2>{f'<table><thead><tr><th>Rule</th><th>Start (s)</th><th>End (s)</th><th>Length (s)</th></tr></thead><tbody>{ev_rows}</tbody></table>' if ev_rows else '<p class="note">No events (no rules defined, or none held long enough).</p>'}
 <h2>Import notes</h2><ul class="note">{assumptions}</ul></body></html>"""
+
+
+REVIEW_CSS = """
+.sev{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;margin-right:6px;border:1px solid #999}
+.sev.high{background:#e11d2a;color:#fff;border-color:#e11d2a}.sev.medium{background:#fde8ea;color:#9b111a;border-color:#e11d2a}
+.sev.low{color:#555}.finding{margin:16px 0;break-inside:avoid}.finding h3{font-size:14px;margin:0 0 3px}
+.finding p{margin:3px 0;max-width:80ch}.finding table{margin-top:6px;font-size:12px}
+.finding td:last-child,.finding th:last-child{text-align:left}
+"""
+
+def _keys(group) -> str:
+    return "".join(
+        f'<span class="key" style="background:{PALETTE[j % len(PALETTE)]}"></span>{escape(n)}{f" ({escape(u)})" if u else ""}'
+        for j, (n, u, _, _) in enumerate(group)
+    )
+
+
+SEVERITY_NAME = {"high": "Needs attention", "medium": "Worth a look", "low": "Probably normal"}
+
+
+def render_review(result: dict, sources: list[dict], plots: dict[str, list[list[tuple[str, str, np.ndarray, np.ndarray]]]]) -> str:
+    """The review findings as one page to hand to the team: what was checked, what was found, where."""
+    findings = result["findings"]
+    groups = [(sev, [f for f in findings if f["severity"] == sev]) for sev in ("high", "medium", "low")]
+    log_rows = "".join(
+        f"<tr><td>{escape(s['label'])}</td><td>{escape(s.get('started_at') or 'unknown')}</td><td>{_fmt(s['duration_s'])}</td>"
+        f"<td>{len(s['channels'])}</td></tr>"
+        for s in sources
+    )
+    body = []
+    for sev, fs in groups:
+        if not fs:
+            continue
+        body.append(f"<h2>{SEVERITY_NAME[sev]} ({len(fs)})</h2>")
+        for f in fs:
+            ev = f.get("evidence")
+            evidence = (
+                f"<p class=note>It followed {ev['followed']} of {ev['events']} times. By chance alone it would be about {round(ev['chance'] * 100)}%.</p>"
+                if ev
+                else ""
+            )
+            occ = "".join(
+                f"<tr><td>{escape(o['label'])}</td><td>{_fmt(o['t0'])} to {_fmt(o['t1'])} s</td><td>{escape(o['note'])}</td></tr>"
+                for o in f["occurrences"][:8]
+            )
+            more = f"<p class=note>and {f['count'] - 8} more</p>" if f["count"] > 8 else ""
+            figs = "".join(f'<div class="plot"><h3>{_keys(g)}</h3>{svg}</div>' for g, svg in plots.get(f["key"], []))
+            body.append(
+                f'<div class="finding"><h3><span class="sev {sev}">{SEVERITY_NAME[sev]}</span>{escape(f["title"])}</h3>'
+                f"<p>{escape(f['detail'])}</p>{evidence}{figs}"
+                f"<table><thead><tr><th>Log</th><th>When</th><th>What</th></tr></thead><tbody>{occ}</tbody></table>{more}</div>"
+            )
+    if not findings:
+        body.append("<p>The checks found nothing to flag in these logs.</p>")
+    notes = "".join(f"<li>{escape(n)}</li>" for n in result.get("notes", []))
+    marked = len(result.get("muted", []))
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Review report</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><style>{CSS}{REVIEW_CSS}</style></head><body>
+<h1>Review report</h1><p class="sub">Generated {datetime.now():%Y-%m-%d %H:%M}. {len(sources)} log{'s' if len(sources) != 1 else ''}, {result['checked']['channels']} channels. A finding says the car did not match how it behaves elsewhere in these logs; it is not a diagnosis.</p>
+<h2>Logs</h2><table><thead><tr><th>Log</th><th>Started</th><th>Seconds</th><th>Channels</th></tr></thead><tbody>{log_rows}</tbody></table>
+{''.join(body)}
+{f'<h2>Notes</h2><ul class="note">{notes}</ul>' if notes else ''}
+{f'<p class="note">{marked} finding{"s" if marked != 1 else ""} marked as normal {"are" if marked != 1 else "is"} left out.</p>' if marked else ''}
+</body></html>"""

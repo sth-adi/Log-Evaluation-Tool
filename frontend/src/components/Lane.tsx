@@ -45,6 +45,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const eventsRef = useRef<{ rule: string; t_start: number; t_end: number }[]>([]);
+  const focusRef = useRef<[number, number] | null>(null);
   const applyingRef = useRef(false); // true while we reload data, so the zoom store is left alone
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
@@ -54,6 +55,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const sources = useStore((s) => s.sources);
   const view = useStore((s) => s.view);
   const rev = useStore((s) => s.rev);
+  const focus = useStore((s) => s.focus);
   const removeLane = useStore((s) => s.removeLane);
 
   const seriesKey = lane.series.map((s) => `${s.sourceId}|${s.channel}`).join(",");
@@ -180,6 +182,15 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
               const b = Math.min(u.valToPos(Math.max(e.t_end, e.t_start), "x", true), left + width);
               if (b < left || a > left + width) continue;
               ctx.fillRect(a, top, Math.max(b - a, 2 * devicePixelRatio), height);
+            }
+            const f = focusRef.current;
+            if (f) {
+              const a = Math.max(u.valToPos(f[0], "x", true), left);
+              const b = Math.min(u.valToPos(f[1], "x", true), left + width);
+              if (b >= left && a <= left + width) {
+                ctx.fillStyle = "rgba(229, 57, 69, 0.16)";
+                ctx.fillRect(a, top, Math.max(b - a, 2 * devicePixelRatio), height);
+              }
             }
             ctx.restore();
           },
@@ -346,6 +357,11 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
       plotRef.current = null;
     };
   }, [seriesKey, isLast, width > 50, bands]);
+
+  useEffect(() => {
+    focusRef.current = focus;
+    plotRef.current?.redraw(false);
+  }, [focus]);
 
   // Event spans from the rules of every log in this lane, drawn as shaded bands.
   const rulesKey = sources
