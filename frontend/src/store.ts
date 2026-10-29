@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, type Dbc, type Finding, type LapParams, type Limit, type Review, type ReviewOcc } from "./api";
+import { api, type Dbc, type Finding, type LapParams, type Limit, type Review, type ReviewOcc, type TeamMe } from "./api";
 import { readJson, writeJson } from "./storage";
 
 export type Channel = {
@@ -87,6 +87,9 @@ type State = {
   libraryOpen: boolean;
   /** Whether this browser is on the PC that runs the tool, and whether phone access is on. Assume the PC until known. */
   access: { local: boolean; sharing: boolean };
+  team: TeamMe | null; // who is signed in when team accounts are on
+  teamOpen: boolean;
+  setTeamOpen: (open: boolean) => void;
   loadAccess: () => Promise<void>;
   shareOpen: boolean;
   setShareOpen: (open: boolean) => void;
@@ -378,9 +381,12 @@ export const useStore = create<State>((set, get) => ({
   library: [],
   libraryOpen: false,
   access: { local: true, sharing: false },
+  team: null,
+  teamOpen: false,
+  setTeamOpen: (teamOpen) => set({ teamOpen }),
   loadAccess: async () => {
     try {
-      set({ access: await api.health() });
+      set({ access: await api.health(), team: await api.teamMe() });
     } catch {
       /* the first real request reports a missing backend */
     }

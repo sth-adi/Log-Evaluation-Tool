@@ -36,7 +36,21 @@ router = APIRouter()
 
 
 def sharing_enabled() -> bool:
-    return os.environ.get("LET_LAN") == "1"
+    return os.environ.get("LET_LAN") == "1" or os.environ.get("LET_TEAM") == "1"
+
+
+def team_enabled() -> bool:
+    return os.environ.get("LET_TEAM") == "1"
+
+
+# A reverse proxy or tunnel on this PC reaches the tool from 127.0.0.1, so its requests must not
+# count as the PC itself. Proxies say who the real caller is in one of these headers.
+PROXY_HEADERS = (b"x-forwarded-for", b"forwarded", b"x-real-ip", b"cf-connecting-ip", b"x-forwarded-host", b"true-client-ip")
+
+
+def proxied(headers) -> bool:
+    names = {k.lower() if isinstance(k, bytes) else k.lower().encode() for k, _ in headers}
+    return any(h in names for h in PROXY_HEADERS)
 
 
 def is_loopback(host: str | None) -> bool:
@@ -50,7 +64,7 @@ def is_loopback(host: str | None) -> bool:
 
 def is_local(request: Request) -> bool:
     """True when the request comes from the PC that runs the tool."""
-    return is_loopback(request.client.host if request.client else None)
+    return is_loopback(request.client.host if request.client else None) and not proxied(request.scope["headers"])
 
 
 def require_local(request: Request) -> None:
@@ -100,6 +114,9 @@ def _same(a: str | None, b: str) -> bool:
 # --- finding this PC's address on the network ---------------------------------------------------
 
 
+TAILSCALE = ipaddress.ip_network("100.64.0.0/10")  # addresses on a Tailscale network
+
+
 def usable_addresses(candidates: list[str]) -> list[str]:
     """Private network addresses only, in the order given, without repeats."""
     out: list[str] = []
@@ -108,7 +125,7 @@ def usable_addresses(candidates: list[str]) -> list[str]:
             a = ipaddress.ip_address(ip)
         except ValueError:
             continue
-        if a.version != 4 or not a.is_private or a.is_loopback or a.is_link_local or ip in out:
+        if a.version != 4 or not (a.is_private or a in TAILSCALE) or a.is_loopback or a.is_link_local or ip in out:
             continue
         out.append(ip)
     return out
@@ -165,7 +182,7 @@ class AccessMiddleware:
         if scope["type"] not in ("http", "websocket"):
             return await self.app(scope, receive, send)
         client = scope.get("client")
-        if is_loopback(client[0] if client else None):
+        if is_loopback(client[0] if client else None) and not proxied(scope["headers"]):
             return await self.app(scope, receive, send)
 
         if not sharing_enabled():
@@ -177,8 +194,10 @@ class AccessMiddleware:
         if scope["type"] == "websocket":
             return await _refuse(scope, send, 403, "", "")
 
-        expected = key()
         headers = {k.lower(): v for k, v in scope["headers"]}
+        if team_enabled():
+            return await self._team(scope, receive, send, headers)
+        expected = key()
         jar = SimpleCookie()
         try:
             jar.load(headers.get(b"cookie", b"").decode("latin-1"))
@@ -210,13 +229,53 @@ class AccessMiddleware:
         )
 
 
+    async def _team(self, scope, receive, send, headers):
+        """Team mode: other devices sign in with an account instead of using the sharing key."""
+        from . import team
+
+        who = team.user_for_token(team.token_from_cookie_header(headers.get(b"cookie", b"")))
+        if who:
+            scope.setdefault("state", {})["team_user"] = who
+            return await self.app(scope, receive, send)
+        if scope["method"] == "POST" and scope["path"] == "/api/team/login":
+            return await self.app(scope, receive, send)
+        if scope["path"].startswith("/api"):
+            return await _refuse(scope, send, 401, "", "Sign in first.")
+        body = _SIGN_IN.encode()
+        await send(
+            {"type": "http.response.start", "status": 401, "headers": [(b"content-type", b"text/html; charset=utf-8"), (b"cache-control", b"no-store")]}
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
+_SIGN_IN = """<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in</title>
+<body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0a0b0d;color:#eceef2;font:16px/1.5 system-ui,sans-serif">
+<form id="f" style="width:min(22rem,90vw);display:grid;gap:12px;padding:24px">
+<h1 style="font-size:22px;margin:0">Log Evaluation Tool</h1>
+<p style="color:#8b919c;margin:0">Sign in with the name and password the team administrator made for you.</p>
+<input id="n" autocomplete="username" placeholder="Name" required style="padding:10px;border-radius:6px;border:1px solid #2a2f38;background:#14171c;color:inherit;font:inherit">
+<input id="p" type="password" autocomplete="current-password" placeholder="Password" required style="padding:10px;border-radius:6px;border:1px solid #2a2f38;background:#14171c;color:inherit;font:inherit">
+<button style="padding:10px;border:0;border-radius:6px;background:#e53945;color:#fff;font:inherit;font-weight:600;cursor:pointer">Sign in</button>
+<p id="e" role="alert" style="color:#ff8a92;margin:0;min-height:1.5em"></p></form>
+<script>
+document.getElementById("f").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const r = await fetch("/api/team/login", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name: document.getElementById("n").value, password: document.getElementById("p").value})});
+  if (r.ok) return location.reload();
+  document.getElementById("e").textContent = (await r.json()).detail || "Could not sign in.";
+};
+</script></body></html>"""
+
+
 # --- endpoints ----------------------------------------------------------------------------------
 
 
 @router.get("/api/sharing", response_class=PlainTextResponse, include_in_schema=False)
 def sharing_text() -> str:
     """Plain text so the launcher can check it without parsing JSON."""
-    return "sharing-on" if sharing_enabled() else "sharing-off"
+    return ("sharing-on" + (" team-on" if team_enabled() else "")) if sharing_enabled() else "sharing-off"
 
 
 @router.get("/api/share")
@@ -226,6 +285,8 @@ def share_info(request: Request) -> dict:
     if not sharing_enabled():
         return {"enabled": False}
     port = request.url.port or 80
+    if team_enabled():  # teammates sign in with an account, so the address carries no key
+        return {"enabled": True, "port": port, "urls": [f"http://{ip}:{port}/" for ip in lan_addresses()]}
     k = key()
     return {"enabled": True, "port": port, "urls": [f"http://{ip}:{port}/?key={k}" for ip in lan_addresses()]}
 

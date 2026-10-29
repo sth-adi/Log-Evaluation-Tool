@@ -1,5 +1,7 @@
 import type { ConvertJob, ConvertStatus, LibraryEntry, Metric, SavedView, Source, ViewPayload } from "./store";
 
+export type TeamMe = { team: boolean; user: string | null; role: "admin" | "member" | null; local: boolean };
+export type TeamUser = { name: string; role: "admin" | "member"; created: string };
 export type ShareInfo = { enabled: false } | { enabled: true; port: number; urls: string[] };
 
 async function parse<T>(r: Response): Promise<T> {
@@ -417,6 +419,16 @@ export const api = {
   libraryOpen: (id: string) => fetch(`/api/library/${id}/open`, { method: "POST" }).then((r) => parse<Source>(r)),
   libraryClose: (id: string) => fetch(`/api/library/${id}/close`, { method: "POST" }).then((r) => parse<Source>(r)),
   health: () => fetch("/api/health").then((r) => parse<{ local: boolean; sharing: boolean }>(r)),
+  teamMe: () => fetch("/api/team/me").then((r) => parse<TeamMe>(r)),
+  teamUsers: () => fetch("/api/team/users").then((r) => parse<TeamUser[]>(r)),
+  saveTeamUser: (name: string, body: { password?: string; role?: TeamUser["role"] }) =>
+    fetch(`/api/team/users/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => parse<TeamUser>(r)),
+  deleteTeamUser: (name: string) => fetch(`/api/team/users/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) => parse<void>(r)),
+  teamLogout: () => fetch("/api/team/logout", { method: "POST" }).then((r) => parse<void>(r)),
   share: () => fetch("/api/share").then((r) => parse<ShareInfo>(r)),
   resetShare: () => fetch("/api/share/reset", { method: "POST" }).then((r) => parse<ShareInfo>(r)),
   libraryFolder: () => fetch("/api/library/folder/open", { method: "POST" }).then((r) => parse<{ path: string }>(r)),

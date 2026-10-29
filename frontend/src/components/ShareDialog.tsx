@@ -58,6 +58,7 @@ export function ShareDialog() {
   if (!open) return null;
   const urls = info?.enabled ? info.urls : [];
   const url = urls[Math.min(pick, urls.length - 1)];
+  const keyed = !url || url.includes("key=");
 
   const reset = async () => {
     try {
@@ -130,14 +131,18 @@ export function ShareDialog() {
               <ul>
                 <li>Windows asks once whether to allow Python on the network. Choose Private networks.</li>
                 <li>Hotel, campus and guest Wi-Fi often stop devices seeing each other. A phone hotspot works.</li>
-                <li>Use the link as shown. It carries a key, so only people you give it to can open the tool.</li>
+                <li>
+                  {keyed
+                    ? "Use the link as shown. It carries a key, so only people you give it to can open the tool."
+                    : "Team accounts are on: they sign in with the name and password you made under More, Team."}
+                </li>
               </ul>
             </details>
           </>
         )}
 
         <footer>
-          {info?.enabled && (
+          {info?.enabled && keyed && (
             <button className="btn ghost" onClick={() => void reset()} title="Signs out every phone that used the old link">
               New link
             </button>

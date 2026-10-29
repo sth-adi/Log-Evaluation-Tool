@@ -18,6 +18,17 @@ The backend has automated tests. The Windows scripts and the browser UI have not
 
 Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desktop). It starts the tool, waits until it is ready and opens http://127.0.0.1:8000 in your browser. If it is already running it just opens the page. A minimised window stays in the taskbar while the tool runs; close that window to stop it. By default it answers only this PC, so nothing is visible on the network.
 
+## Team accounts
+
+One PC holds the library and the others open it in their browser, each with their own login. Start it with **`Log Evaluation Tool (team).bat`** on the PC that will hold the logs (keep it switched on). Under **More > Team** make an account for each person: a name, a password of 10 or more characters, and whether they can make accounts too. Teammates open the PC's address (shown under **More > Open on phone**) and sign in. They see the same logs, views, limits and findings, and anything they import is kept on that PC, so one backup of its library folder covers everyone.
+
+- The PC itself needs no sign-in and is always an administrator. Everyone else sees only a sign-in page until they have an account.
+- Passwords are stored as scrypt hashes. Five wrong tries lock that name from that address for 15 minutes. A sign-in lasts 30 days and ends when the account is deleted or its password changes.
+- Anything that acts on the PC (converting `.LRD` logs through LifeView, Explorer, serial ports for live data) still works on that PC only.
+- A tunnel or proxy running on the PC does not count as the PC: requests that carry a forwarding header are treated as from outside.
+- **To reach it from outside the building, use Tailscale** (free): install it on the PC and on each teammate's computer, sign in to the same network, and use the PC's Tailscale address. The tool sends sign-ins over plain HTTP, so never forward its port on your router. Tailscale encrypts the traffic.
+- There are no cloud servers or subscriptions. If the PC is off, the library is not reachable; teammates who need it offline can run their own copy and use views and report files to share.
+
 ## On a phone
 
 Double-click **`Log Evaluation Tool (phone).bat`** instead (or run `.\scripts\run.ps1 -Phone`). The tool opens with a QR code; scan it with the phone's camera, with the phone on the same Wi-Fi as the PC. You can also get the code later from **More > Open on phone**. The first time, Windows asks whether Python may use the network: choose **Private networks** and **Allow**.

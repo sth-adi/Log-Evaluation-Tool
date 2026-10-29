@@ -11,6 +11,8 @@ import { Menu } from "./components/Menu";
 import { Palette } from "./components/Palette";
 import { Review } from "./components/Review";
 import { ShareDialog } from "./components/ShareDialog";
+import { Team } from "./components/Team";
+import { api } from "./api";
 import { Views } from "./components/Views";
 import { extentOf, useStore } from "./store";
 
@@ -37,6 +39,8 @@ export default function App() {
   const access = useStore((s) => s.access);
   const loadAccess = useStore((s) => s.loadAccess);
   const setShareOpen = useStore((s) => s.setShareOpen);
+  const team = useStore((s) => s.team);
+  const setTeamOpen = useStore((s) => s.setTeamOpen);
   const railOpen = useStore((s) => s.railOpen);
   const setRailOpen = useStore((s) => s.setRailOpen);
   const [dragging, setDragging] = useState(false);
@@ -169,6 +173,10 @@ export default function App() {
             { label: "Saved views", note: "Keep or share a set-up", disabled: !hasLogs, onSelect: () => setViewsOpen(true) },
             { label: "Report", note: "Printable page of the plotted channels", disabled: lanes.length === 0, onSelect: openReports },
             { label: "Live data", note: "Follow a car as it runs", onSelect: () => setMode("live") },
+            ...(team?.team && team.role === "admin" ? [{ label: "Team", note: "Accounts for teammates", onSelect: () => setTeamOpen(true) }] : []),
+            ...(team?.team && !team.local && team.user
+              ? [{ label: `Sign out (${team.user})`, onSelect: () => void api.teamLogout().then(() => location.reload()) }]
+              : []),
             ...(access.local ? [{ label: "Open on phone", note: "Scan a code to use the tool on your phone", onSelect: () => setShareOpen(true) }] : []),
           ]}
         />
@@ -236,6 +244,7 @@ export default function App() {
       <Library />
       <Views />
       <ShareDialog />
+      <Team />
 
       {message && (
         <div className={`toast ${message.kind}`} role={message.kind === "info" ? "status" : "alert"}>

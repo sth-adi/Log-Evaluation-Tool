@@ -13,6 +13,11 @@ if /i "%~1"=="phone" (
   set LET_LAN=1
   set OPEN=%URL%/#phone
 )
+rem "team" opens it to teammates, who sign in with an account the administrator makes (More > Team).
+if /i "%~1"=="team" (
+  set HOST=0.0.0.0
+  set LET_TEAM=1
+)
 
 rem Packaged copy: use the Python that ships beside this file, and keep logs outside the folder
 rem so unpacking a newer version never loses them.
@@ -35,6 +40,11 @@ if /i "%~1"=="phone" (
   echo choose "Private networks" and press Allow. Then scan the code shown in the tool.
   echo.
 )
+if /i "%~1"=="team" (
+  echo Team access is on. When Windows asks whether to let Python use the network,
+  echo choose "Private networks" and press Allow. Make accounts in the tool under More, Team.
+  echo.
+)
 echo Starting Log Evaluation Tool...
 start "Log Evaluation Tool - close this window to stop it" /min "%PY%" -m uvicorn backend.app.main:app --host %HOST% --port %PORT% --no-proxy-headers
 
@@ -52,6 +62,13 @@ pause
 exit /b 1
 
 :running
+if /i "%~1"=="team" (
+  curl -s %URL%/api/sharing | find "team-on" >nul && goto open
+  echo The tool is already running without team access.
+  echo Close its minimised "Log Evaluation Tool" window in the taskbar, then open this launcher again.
+  pause
+  exit /b 1
+)
 if /i not "%~1"=="phone" goto open
 curl -s %URL%/api/sharing | find "sharing-on" >nul && goto open
 echo The tool is already running without phone access.

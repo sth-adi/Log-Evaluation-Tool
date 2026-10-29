@@ -64,7 +64,7 @@ Get-ChildItem (Join-Path $app "backend") -Recurse -Directory -Filter "__pycache_
 Remove-Item (Join-Path $app "backend\tests") -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force (Join-Path $app "frontend") | Out-Null
 Copy-Item frontend\dist -Destination (Join-Path $app "frontend") -Recurse
-Copy-Item "Log Evaluation Tool.bat", "Log Evaluation Tool (phone).bat", README.md -Destination $app
+Copy-Item "Log Evaluation Tool.bat", "Log Evaluation Tool (phone).bat", "Log Evaluation Tool (team).bat", README.md -Destination $app
 @"
 Log Evaluation Tool
 ===================

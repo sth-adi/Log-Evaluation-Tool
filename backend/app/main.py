@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import access, analysis, can_import, laps, lifeview, live, pulls, report, review, store, summary, workspaces
+from . import access, analysis, can_import, laps, lifeview, live, pulls, report, review, store, summary, team, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_any
@@ -34,6 +34,7 @@ app = FastAPI(title="Log Evaluation Tool", version="0.1.0")
 app.add_middleware(access.AccessMiddleware)  # other devices (a phone) need sharing on and the key
 app.include_router(live.router)
 app.include_router(access.router)
+app.include_router(team.router)
 
 
 @app.get("/api/health")
