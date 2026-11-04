@@ -40,6 +40,8 @@ export default function App() {
   const loadAccess = useStore((s) => s.loadAccess);
   const setShareOpen = useStore((s) => s.setShareOpen);
   const team = useStore((s) => s.team);
+  const focus = useStore((s) => s.focus);
+  const clearFocus = useStore((s) => s.clearFocus);
   const setTeamOpen = useStore((s) => s.setTeamOpen);
   const railOpen = useStore((s) => s.railOpen);
   const setRailOpen = useStore((s) => s.setRailOpen);
@@ -222,6 +224,22 @@ export default function App() {
           </div>
         ) : (
           <>
+            {focus && (
+              <aside className={`focus-note ${focus.severity}`} role="status">
+                <div className="focus-text">
+                  <strong>{focus.title}</strong>
+                  <p>{focus.why}</p>
+                  <span className="muted small">
+                    {focus.log.replace(/ plus 0h00m00s /, " ")} at {focus.at.toFixed(1)} s into that log
+                  </span>
+                </div>
+                <button className="icon-btn" onClick={clearFocus} aria-label="Hide this explanation" title="Hide this explanation">
+                  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+                    <path d="M3 3l8 8M11 3l-8 8" />
+                  </svg>
+                </button>
+              </aside>
+            )}
             <div className="lanes">
               {lanes.map((lane, i) => {
                 const offset = colorOffset;

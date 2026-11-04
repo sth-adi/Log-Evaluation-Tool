@@ -2432,3 +2432,33 @@ details.opts[open] {
     font-size: var(--t12);
   }
 }
+
+/* what a finding means at the spot it points to, above the plots */
+.focus-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 8px 16px 0;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--red);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.focus-note.medium {
+  border-left-color: #ffb020;
+}
+.focus-note.low {
+  border-left-color: var(--muted);
+}
+.focus-text {
+  flex: 1;
+  min-width: 0;
+}
+.focus-text p {
+  margin: 4px 0;
+  max-width: 78ch;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}

@@ -80,6 +80,18 @@ export type SavedView = { id: string; name: string; saved_at: string; payload: V
 export type LaneSeries = { sourceId: string; channel: string };
 export type Lane = { id: number; series: LaneSeries[] };
 
+/** What a finding points at while it is shown on the plots. */
+export type Focus = {
+  range: [number, number];
+  title: string;
+  note: string; // a few words, drawn on the plot
+  why: string; // what is wrong at this spot, in plain words
+  severity: "high" | "medium" | "low";
+  channels: string[];
+  log: string;
+  at: number; // seconds into that log
+};
+
 type State = {
   sources: Source[];
   lanes: Lane[];
@@ -143,7 +155,8 @@ type State = {
   restoreFinding: (key: string) => Promise<void>;
   saveLimits: (limits: Limit[]) => Promise<boolean>;
   openFinding: (f: Finding, o: ReviewOcc) => void;
-  focus: [number, number] | null; // the stretch a finding points at, shaded on every plot
+  clearFocus: () => void;
+  focus: Focus | null; // the stretch a finding points at: shaded on every plot, labelled on the plots it is about
   tool: ToolId | null; // the open tool under Analyse, or null for the list of tools
   setTool: (t: ToolId | null) => void;
   view: [number, number] | null; // null = full extent
@@ -371,11 +384,21 @@ export const useStore = create<State>((set, get) => ({
     const pad = Math.max(1.5, (o.t1 - o.t0) * 0.5);
     set({
       mode: "plots",
-      focus: [src.offset_s + o.t0, src.offset_s + Math.max(o.t1, o.t0)],
+      focus: {
+        range: [src.offset_s + o.t0, src.offset_s + Math.max(o.t1, o.t0)],
+        title: f.title,
+        note: o.note,
+        why: o.why ?? f.detail,
+        severity: f.severity,
+        channels: f.channels,
+        log: o.label,
+        at: o.t0,
+      },
       view: [src.offset_s + Math.max(o.t0 - pad, 0), src.offset_s + Math.min(o.t1 + pad, src.duration_s)],
     });
   },
   focus: null,
+  clearFocus: () => set({ focus: null }),
   tool: null,
   setTool: (tool) => set({ tool, mode: "analyse" }),
   library: [],

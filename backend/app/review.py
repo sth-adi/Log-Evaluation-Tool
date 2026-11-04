@@ -186,13 +186,15 @@ def _is_counter(x: np.ndarray) -> bool:
     return bool(v.size > 1 and np.all(v == np.round(v)) and np.all(np.diff(v) >= 0) and v[-1] > v[0])
 
 
-def _occ(log: Log, i0: int, i1: int, note: str) -> dict:
+def _occ(log: Log, i0: int, i1: int, note: str, why: str = "") -> dict:
+    """One place in one log. ``note`` is a few words for a label; ``why`` says in plain words what is wrong at this spot."""
     return {
         "log_id": log.id,
         "label": log.label,
         "t0": float(log.t[min(i0, log.n - 1)]),
         "t1": float(log.t[min(max(i1 - 1, i0), log.n - 1)]),
         "note": note,
+        **({"why": why} if why else {}),
     }
 
 
@@ -476,7 +478,13 @@ def find_links(logs: list[Log]) -> list[dict]:
             occs = []
             for li, ev in miss.items():
                 for i in ev:
-                    o = _occ(logs[li], int(i), int(i) + int(WINDOW_S * logs[li].rate), f"no movement in {chans[0]} within {WINDOW_S:g} s")
+                    o = _occ(
+                        logs[li],
+                        int(i),
+                        int(i) + int(WINDOW_S * logs[li].rate),
+                        f"no movement in {chans[0]} within {WINDOW_S:g} s",
+                        f"Here {trig}, but {chans[0]} stayed still for the next {WINDOW_S:g} s. After {g['hits']} of the {g['n']} events in these logs it moved.",
+                    )
                     if reason:
                         o["fits"] = (li, int(i)) in reason["fits"]
                     occs.append(o)
@@ -549,10 +557,12 @@ def find_self_reports(logs: list[Log]) -> list[dict]:
                     v = float(vv[np.argmax(cc)])
                     what = l.state_label(ch, v) or _num(v)
                     labels.add(what)
-                    occs.append(_occ(l, a, b, what))
+                    occs.append(_occ(l, a, b, what, f"{ch} read {what} here while the engine was running ({l.t[min(b, l.n - 1)] - l.t[a]:.1f} s)."))
             if occs:
                 norm_lab = next((l.state_label(ch, normal) for l in have if l.state_label(ch, normal)), None) or _num(normal)
                 always = share > ALWAYS_ON
+                for o in occs:
+                    o["why"] += f" Its usual value is {norm_lab}." + (" It reads this way for most of the running time, so it is probably normal for this ECU." if always else "")
                 findings.append(
                     _finding(
                         key=f"report:{ch}",
@@ -577,7 +587,7 @@ def find_self_reports(logs: list[Log]) -> list[dict]:
                     continue
                 f = _fill(x)
                 for i in np.flatnonzero(np.diff(f) > 0) + 1:
-                    occs.append(_occ(l, int(i), int(i) + 1, f"count rose to {_num(f[i])}"))
+                    occs.append(_occ(l, int(i), int(i) + 1, f"count rose to {_num(f[i])}", f"{ch} counted up to {_num(f[i])} at this moment: a fault or error was recorded here."))
             if occs:
                 findings.append(
                     _finding(
@@ -616,7 +626,15 @@ def find_stuck(logs: list[Log]) -> list[dict]:
             if run.sum() < int(3 * l.rate) or np.ptp(x[run]) != 0:
                 continue
             idx = np.flatnonzero(run)
-            occs.append(_occ(l, int(idx[0]), int(idx[-1]) + 1, f"stuck at {_num(float(x[idx[0]]))}"))
+            occs.append(
+                _occ(
+                    l,
+                    int(idx[0]),
+                    int(idx[-1]) + 1,
+                    f"stuck at {_num(float(x[idx[0]]))}",
+                    f"{ch} read exactly {_num(float(x[idx[0]]))} the whole time the engine ran, though it moves in {len(moves)} other log{'s' if len(moves) > 1 else ''}. A dead or unplugged sensor looks like this.",
+                )
+            )
         if occs:
             findings.append(
                 _finding(
@@ -665,7 +683,7 @@ def find_dropouts(logs: list[Log]) -> list[dict]:
                     title="Samples are missing from a log",
                     detail="The log jumps forward in time with no samples in between.",
                     channels=[],
-                    occurrences=[_occ(l, int(i), int(i) + 2, f"{l.t[i + 1] - l.t[i]:.2f} s without samples")],
+                    occurrences=[_occ(l, int(i), int(i) + 2, f"{l.t[i + 1] - l.t[i]:.2f} s without samples", f"The logger recorded nothing for {l.t[i + 1] - l.t[i]:.2f} s here, so whatever happened in this stretch is missing from every channel.")],
                 )
             )
     merged: dict[str, dict] = {}
@@ -689,7 +707,7 @@ def find_dropouts(logs: list[Log]) -> list[dict]:
                             title=f"{ch} had no value for a while",
                             detail="The channel went blank while the others kept logging.",
                             channels=[ch],
-                            occurrences=[_occ(l, a, b, f"{l.t[min(b, l.n - 1)] - l.t[a]:.2f} s with no value")],
+                            occurrences=[_occ(l, a, b, f"{l.t[min(b, l.n - 1)] - l.t[a]:.2f} s with no value", f"{ch} went blank for {l.t[min(b, l.n - 1)] - l.t[a]:.2f} s while the other channels kept logging. Its sensor, its wiring or the message that carries it dropped out.")],
                         )
                     )
         for a, b in whole:
@@ -702,7 +720,7 @@ def find_dropouts(logs: list[Log]) -> list[dict]:
                         title="Most channels went blank together",
                         detail="Logging probably stopped or the logger lost its link.",
                         channels=[],
-                        occurrences=[_occ(l, a, b, f"{l.t[min(b, l.n - 1)] - l.t[a]:.2f} s")],
+                        occurrences=[_occ(l, a, b, f"{l.t[min(b, l.n - 1)] - l.t[a]:.2f} s", f"Almost every channel went blank together for {l.t[min(b, l.n - 1)] - l.t[a]:.2f} s. Logging stopped or the logger lost its link to the ECU.")],
                     )
                 )
     return _combine(out)
@@ -744,9 +762,20 @@ def find_limit_breaches(logs: list[Log], limits: list[dict]) -> tuple[list[dict]
             for a, b in _runs(over):
                 if l.t[min(b, l.n - 1)] - l.t[a] >= float(lim.get("seconds", 0)):
                     peak = float(np.nanmax(x[a:b]) if op == ">" else np.nanmin(x[a:b]))
-                    occs.append(_occ(l, a, b, f"{'peak' if op == '>' else 'low'} {_num(peak)}"))
+                    occs.append((l, a, b, peak))
         if occs:
             unit = next((l.unit(ch) for l in have if l.unit(ch)), "")
+            u = f" {unit}" if unit else ""
+            occs = [
+                _occ(
+                    l,
+                    a,
+                    b,
+                    f"{'peak' if op == '>' else 'low'} {_num(peak)}",
+                    f"{ch} {'rose to' if op == '>' else 'fell to'} {_num(peak)}{u} here, {'past' if op == '>' else 'below'} your limit of {_num(value)}{u}, for {l.t[min(b, l.n - 1)] - l.t[a]:.1f} s.",
+                )
+                for l, a, b, peak in occs
+            ]
             findings.append(
                 _finding(
                     key=f"limit:{lim['id']}",
@@ -844,7 +873,13 @@ def find_drift(logs: list[Log]) -> list[dict]:
             g = found.setdefault(ch, {"occ": [], "size": 0.0, "unit": unit})
             g["size"] = max(g["size"], abs(d) / span)
             g["occ"].append(
-                _occ(l, span_i[0], span_i[1] + 1, f"{_num(ref)} → {_num(val)}{' ' + unit if unit else ''} at the same load ({len(deltas)} band{'s' if len(deltas) > 1 else ''})")
+                _occ(
+                    l,
+                    span_i[0],
+                    span_i[1] + 1,
+                    f"{_num(ref)} → {_num(val)}{' ' + unit if unit else ''} at the same load ({len(deltas)} band{'s' if len(deltas) > 1 else ''})",
+                    f"At the same rpm and throttle, {ch} read about {_num(ref)}{' ' + unit if unit else ''} in earlier runs and about {_num(val)}{' ' + unit if unit else ''} here.",
+                )
                 | {"delta": d}
             )
     findings = []
@@ -1030,7 +1065,11 @@ def find_ties(logs: list[Log]) -> list[dict]:
         g = found.setdefault(key, {"lead": lead, "chans": chans, "partners": partners, "occ": [], "size": 0.0, "pairs": set()})
         g["size"] = max(g["size"], size)
         g["pairs"] |= pairs
-        g["occ"].append(_occ(l, s0, s1, note))
+        if lead:
+            why = f"{note}. {partner} and its other partners kept agreeing with each other here, so {lead} is the one that moved away."
+        else:
+            why = f"{a} and {b} move together in every log, but here they differed by up to {_num(worst)}{' ' + unit if unit else ''} from how they usually agree."
+        g["occ"].append(_occ(l, s0, s1, note, why))
     findings = []
     for key, g in sorted(found.items(), key=lambda kv: -kv[1]["size"])[:MAX_TIE_FINDINGS]:
         if g["lead"]:
@@ -1141,8 +1180,13 @@ def find_gear_fit(logs: list[Log]) -> list[dict]:
                 g_ = found.setdefault(key, {"said": said, "kind": kind, "actual": actual, "occ": [], "secs": 0.0, "speed": speed_name[l.id], "far": 0.0})
                 if kind == "none":
                     g_["far"] = max(g_["far"], abs(float(np.median(ratio[s0:s1])) / refs[said] - 1))
-                g_["occ"].append(_occ(l, s0, s1, note))
-                g_["secs"] += (s1 - s0) / l.rate
+                secs = (s1 - s0) / l.rate
+                if kind == "other":
+                    why = f"The gear channel said {said}, but the engine rpm against speed matches {actual} for {secs:.1f} s."
+                else:
+                    why = f"The gear channel said {said}, but rpm against speed fits no gear for {secs:.1f} s: it was {_num(float(np.median(ratio[s0:s1])))} where {said} is usually {_num(refs[said])}."
+                g_["occ"].append(_occ(l, s0, s1, note, why))
+                g_["secs"] += secs
     findings = []
     for key, g_ in sorted(found.items(), key=lambda kv: -kv[1]["secs"])[:MAX_TIE_FINDINGS]:
         if g_["kind"] == "other":

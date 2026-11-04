@@ -25,7 +25,7 @@ function getJson<T>(path: string, params: Record<string, string | number | undef
 }
 
 export type Severity = "high" | "medium" | "low";
-export type ReviewOcc = { log_id: string; label: string; t0: number; t1: number; note: string; fits?: boolean };
+export type ReviewOcc = { log_id: string; label: string; t0: number; t1: number; note: string; why?: string; fits?: boolean };
 export type Finding = {
   key: string;
   kind: "link" | "report" | "drift" | "tie" | "gear" | "stuck" | "unused" | "dropout" | "gap" | "limit";

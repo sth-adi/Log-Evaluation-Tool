@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import { api } from "../api";
-import { extentOf, useStore, type Channel, type Lane as LaneModel } from "../store";
+import { extentOf, useStore, type Channel, type Focus, type Lane as LaneModel } from "../store";
 import { spansDays, stamp } from "../time";
 import { attachTouch } from "../touch";
 
@@ -45,7 +45,8 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const eventsRef = useRef<{ rule: string; t_start: number; t_end: number }[]>([]);
-  const focusRef = useRef<[number, number] | null>(null);
+  const focusRef = useRef<Focus | null>(null);
+  const laneChannelsRef = useRef<string[]>([]);
   const applyingRef = useRef(false); // true while we reload data, so the zoom store is left alone
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
@@ -183,7 +184,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
               if (b < left || a > left + width) continue;
               ctx.fillRect(a, top, Math.max(b - a, 2 * devicePixelRatio), height);
             }
-            const f = focusRef.current;
+            const f = focusRef.current?.range;
             if (f) {
               const a = Math.max(u.valToPos(f[0], "x", true), left);
               const b = Math.min(u.valToPos(f[1], "x", true), left + width);
@@ -196,6 +197,38 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
           },
         ],
         draw: [
+          (u) => {
+            // name the problem once, on the plot of the finding's main channel
+            const f = focusRef.current;
+            if (!f || !f.note || !laneChannelsRef.current.includes(f.channels[0])) return;
+            const { ctx } = u;
+            const { left, top, width } = u.bbox;
+            const dpr = devicePixelRatio;
+            const a = u.valToPos(f.range[0], "x", true);
+            const b = u.valToPos(f.range[1], "x", true);
+            if (b < left || a > left + width) return;
+            ctx.save();
+            ctx.font = FONT.replace("12px", `${12 * dpr}px`);
+            ctx.textBaseline = "middle";
+            const pad = 6 * dpr;
+            const text = f.note.length > 60 ? f.note.slice(0, 59) + "…" : f.note;
+            const w = ctx.measureText(text).width + pad * 2;
+            const h = 20 * dpr;
+            let x = Math.max(a, left) + 2 * dpr;
+            if (x + w > left + width) x = Math.max(left, left + width - w - 2 * dpr);
+            const y = top + 4 * dpr;
+            ctx.fillStyle = "rgba(20, 20, 22, 0.92)";
+            ctx.strokeStyle = "#e53945";
+            ctx.lineWidth = dpr;
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, 4 * dpr);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = "#f2f2f2";
+            ctx.textAlign = "left";
+            ctx.fillText(text, x + pad, y + h / 2);
+            ctx.restore();
+          },
           (u) => {
             if (!bands) return;
             const { ctx } = u;
@@ -358,6 +391,7 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
     };
   }, [seriesKey, isLast, width > 50, bands]);
 
+  laneChannelsRef.current = lane.series.map((s) => s.channel);
   useEffect(() => {
     focusRef.current = focus;
     plotRef.current?.redraw(false);

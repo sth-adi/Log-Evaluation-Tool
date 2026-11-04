@@ -494,3 +494,33 @@ def test_the_review_report_leaves_out_what_was_marked_normal(client):
 
 def test_the_review_report_with_no_logs_says_nothing_was_found(client):
     assert "found nothing" in client.get("/api/review/report").text
+
+
+# --- a plain-words sentence for each place -------------------------------------------------------
+
+
+def test_every_place_says_in_plain_words_what_is_wrong_there():
+    # link: a response that is missing
+    link = kinds(review.evaluate([make_log(1), make_log(2, dropped=(28,)), make_log(3)]), "link")[0]
+    miss = next(o for o in link["occurrences"] if o.get("fits") is not None or True)
+    assert "stayed still" in miss["why"] and "moved" in miss["why"]
+    # stuck sensor
+    rng = np.random.default_rng(1)
+    moving = lambda lg: 300 + 50 * np.sin(lg.t) + rng.normal(0, 1, lg.n)
+    stuck = kinds(review.evaluate([_log_with(1, moving), _log_with(2, moving), _log_with(3, lambda lg: np.full(lg.n, 312.0))]), "stuck")[0]
+    assert "read exactly 312" in stuck["occurrences"][0]["why"] and "unplugged" in stuck["occurrences"][0]["why"]
+    # dropout
+    lg = _log_with(1, lambda l: 300 + 50 * np.sin(l.t))
+    lg.cols["oilP"][int(20 * RATE) : int(22 * RATE)] = np.nan
+    assert "went blank for" in kinds(review.evaluate([lg]), "dropout")[0]["occurrences"][0]["why"]
+    # a limit names the value, the limit and the time over it
+    lg = make_log(1, standing_at=(), moving_at=())
+    limit = {"id": "l1", "channel": "temp", "op": ">", "value": 75, "seconds": 2, "severity": "high", "message": "Too hot", "running_only": True}
+    why = kinds(review.evaluate([lg], [limit]), "limit")[0]["occurrences"][0]["why"]
+    assert "rose to" in why and "your limit of 75" in why
+    # gear
+    why = kinds(review.evaluate([_geared(1), _geared(2, other=(15, 19)), _geared(3)]), "gear")[0]["occurrences"][0]["why"]
+    assert "said FIRST" in why and "SECOND" in why
+    # a sensor leaving its twins
+    why = kinds(review.evaluate(_tie_logs(wrong=("b", 30, 34, 0.3))), "tie")[0]["occurrences"][0]["why"]
+    assert "kept agreeing" in why and why.startswith("b was up to")
