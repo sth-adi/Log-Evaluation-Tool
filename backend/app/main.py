@@ -882,6 +882,7 @@ def source_track(
             cols.get("gpsCourse"),
             cols.get("latG"),
             mirror,
+            bounds,
         )
     except ValueError as e:
         raise HTTPException(422, str(e)) from e

@@ -183,3 +183,95 @@ def test_ideal_lap_beats_every_real_lap_when_bests_differ(client):
     r = client.get("/api/lapstats", params={"sources": sid, "sectors": 2}).json()
     real = min(l["duration_s"] for l in r["laps"] if l["valid"])
     assert r["ideal_s"] < real - 0.5
+
+
+# --- track shape estimated from speed and sideways g ---------------------------------------------
+
+
+def stadium(laps=5, bias=0.09, gain=1.0, noise=0.12, standing_s=3.0, timer=True, seed=1, hz=100):
+    """A car lapping a stadium-shaped track (150 m straights, 40 m radius ends) with a realistic sensor:
+    a constant offset, a scale error, and vibration. Positive sideways g turns the heading clockwise."""
+    rng = np.random.default_rng(seed)
+    straight, radius = 150.0, 40.0
+    lap_len = 2 * straight + 2 * np.pi * radius
+    dist, t, rows = 0.0, 0.0, []
+    for _ in range(int(standing_s * hz)):
+        rows.append((t, 0.0, bias + rng.normal(0, noise / 4), 0.0))
+        t += 1 / hz
+    t_line, laps_done = t, 0
+    while laps_done < laps:
+        d = dist % lap_len
+        in_turn = (straight <= d < straight + np.pi * radius) or (d >= 2 * straight + np.pi * radius)
+        v = 10.0 if in_turn else 15.0
+        g = (v * v / radius / 9.80665) * gain if in_turn else 0.0
+        rows.append((t, v * 3.6, bias + g + rng.normal(0, noise), t - t_line))
+        dist += v / hz
+        t += 1 / hz
+        if dist >= (laps_done + 1) * lap_len:
+            laps_done += 1
+            t_line = t
+    # a short in-lap so the last full lap has a line at both ends
+    for _ in range(int(5 * hz)):
+        rows.append((t, 15.0 * 3.6, bias + rng.normal(0, noise), t - t_line))
+        t += 1 / hz
+    df = pd.DataFrame(rows, columns=["Time", "vehicleSpeed", "latG", "lapTime"])
+    return df if timer else df.drop(columns=["lapTime"])
+
+
+def extents(r):
+    x = np.array([v for v in r["x"] if v is not None], dtype=float)
+    y = np.array([v for v in r["y"] if v is not None], dtype=float)
+    return x.max() - x.min(), y.max() - y.min()
+
+
+def test_track_estimate_removes_sensor_offset_and_scale_error_using_the_laps(client):
+    sid = upload(client, stadium(gain=0.88))
+    r = client.get(f"/api/sources/{sid}/track").json()
+    assert r["source"] == "lateral g" and r["estimated"] is True
+    assert r["bias_g"] == pytest.approx(0.09, abs=0.01)
+    assert r["closed_laps"] >= 3
+    assert r["gain"] == pytest.approx(1 / 0.88, rel=0.08)
+    w, h = extents(r)
+    short, long_ = sorted((w, h))
+    assert short == pytest.approx(80, rel=0.15) and long_ == pytest.approx(230, rel=0.15)
+
+
+def test_track_estimate_without_laps_still_keeps_the_layout(client):
+    sid = upload(client, stadium(laps=2, gain=1.0, timer=False))
+    r = client.get(f"/api/sources/{sid}/track").json()
+    assert r["closed_laps"] == 0 and r["gain"] == 1.0
+    short, long_ = sorted(extents(r))
+    assert short == pytest.approx(80, rel=0.3) and long_ == pytest.approx(230, rel=0.3)
+
+
+def test_without_a_standing_spell_the_offset_comes_from_the_straights(client):
+    sid = upload(client, stadium(standing_s=0.0, gain=1.0))
+    r = client.get(f"/api/sources/{sid}/track").json()
+    assert r["bias_from"] == "straights" and r["bias_g"] == pytest.approx(0.09, abs=0.02)
+    short, long_ = sorted(extents(r))
+    assert short == pytest.approx(80, rel=0.2) and long_ == pytest.approx(230, rel=0.2)
+
+
+def test_a_steady_circle_is_not_mistaken_for_a_sensor_offset(client):
+    # all corner, no straight: the reading is real turning, so nothing is taken off
+    r = client.get(f"/api/sources/{upload(client, circuit(lap_times=(30.0, 30.0, 30.0)))}/track").json()
+    assert r["bias_g"] == 0.0 and r["bias_from"] == "none"
+
+
+def test_a_run_that_does_not_turn_has_no_track(client):
+    # what the dyno logs look like: speed climbing, sideways g just an offset and vibration
+    n = 3000
+    rng = np.random.default_rng(3)
+    df = pd.DataFrame({"Time": np.arange(n) / 100, "vehicleSpeed": np.linspace(0, 130, n), "latG": 0.09 + rng.normal(0, 0.12, n)})
+    sid = upload(client, df)
+    r = client.get(f"/api/sources/{sid}/track")
+    assert r.status_code == 422 and "no track shape" in r.json()["detail"]
+
+
+def test_lateral_bias_needs_a_real_standing_spell():
+    t = np.arange(0, 10, 0.01)
+    v = np.where(t < 0.5, 0.0, 10.0)  # standing for half a second only
+    assert laps.lateral_bias(t, v, np.full(t.size, 0.1))[1] == "straights"  # steady reading: the offset
+    assert laps.lateral_bias(t, v, 0.1 + 0.4 * np.sin(t))[1] == "none"  # swinging all over: no clear offset
+    v = np.where(t < 2.0, 0.0, 10.0)
+    assert laps.lateral_bias(t, v, np.full(t.size, 0.1)) == (pytest.approx(0.1), "standing")

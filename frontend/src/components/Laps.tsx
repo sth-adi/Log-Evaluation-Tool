@@ -177,7 +177,7 @@ function LapsView({ srcs, sources, choice, onPick }: { srcs: Source[]; sources: 
           )}
           {refGroup && (
             <TrackCard
-              show={groups.length > 0 || track.data?.source === "gps"}
+              show={groups.length > 0 || track.data != null}
               track={track.data}
               error={track.error}
               names={refGroup.src.channels.map((c) => c.name)}
@@ -660,7 +660,11 @@ function TrackCard(props: {
       )}
       {t?.estimated && (
         <p className="muted small">
-          This log has no GPS position, so the shape is estimated from {t.source === "course" ? "speed and GPS heading" : "speed and sideways g"}. It keeps the layout but drifts a little.
+          This log has no GPS position, so the shape is estimated from {t.source === "course" ? "speed and GPS heading" : "speed and sideways g"}.{" "}
+          {t.closed_laps
+            ? `Each of ${t.closed_laps} laps is pulled back to its start line, so the layout is reliable but corner sizes are approximate.`
+            : "Without laps it cannot be pulled back to the start line, so it drifts the longer the run."}
+          {t.bias_from === "none" && t.source === "lateral g" ? " The car never stood still, so the sensor's own offset could not be removed." : ""}
         </p>
       )}
       {t?.estimated && (

@@ -183,6 +183,10 @@ export type LapStats = {
 export type Track = {
   source: "gps" | "course" | "lateral g";
   estimated: boolean;
+  turned_deg?: number; // how far the car turned in all (estimated tracks)
+  closed_laps?: number; // laps whose ends were pulled together
+  bias_g?: number;
+  bias_from?: "standing" | "straights" | "none";
   t: number[];
   dist?: number[];
   x: (number | null)[];

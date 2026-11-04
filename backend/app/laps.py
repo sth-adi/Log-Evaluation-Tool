@@ -17,6 +17,16 @@ LAP_AUTO = (("lapTime", "reset"), ("lastLapTime", "change"), ("lapCount", "chang
 LAT_RE = re.compile(r"^(gps)?_?lat(itude)?$", re.I)
 LON_RE = re.compile(r"^(gps)?_?lon(g|gitude)?$", re.I)
 MAX_POINTS = 3000
+# dead-reckoned track shape (see _dead_reckon)
+LAT_SMOOTH_S = 0.3  # averaging window that removes engine and road vibration from sideways g
+LAT_DEADBAND_G = 0.03  # smoothed readings smaller than this are treated as driving straight
+LAT_STILL_MPS = 0.5  # slower than this counts as standing still when finding the sensor offset
+LAT_STILL_MIN_S = 1.0  # and it needs at least this long standing
+LAT_STRAIGHT_SHARE = 0.30  # with no standing spell, readings near the usual one must cover this share of the moving time
+LAT_STRAIGHT_BAND_G = 0.04  # "near" means within this of it (vibration spreads a straight over about this much)
+LAT_BIAS_MAX_G = 0.25  # a sensor offset is no bigger than this; larger steady readings are taken to be cornering
+TURN_MIN_DEG = 30.0  # a run that turns less than this has no shape worth drawing
+LOOP_MIN, LOOP_MAX = 0.75, 1.25  # a lap turning through this many full circuits is taken to be one circuit
 
 
 def to_mps(v: np.ndarray, unit: str) -> np.ndarray:
@@ -321,6 +331,7 @@ def track_path(
     course_deg: np.ndarray | None = None,
     lat_g: np.ndarray | None = None,
     mirror: bool = False,
+    bounds: list[float] | None = None,
 ) -> dict:
     """Plan view of the run in metres.
 
@@ -345,13 +356,109 @@ def track_path(
         y = np.cumsum(v * np.cos(h) * dt)
         return _finish(t, x, y, "course")
     if lat_g is not None and np.isfinite(lat_g).sum() > 10:
-        a = np.where(np.isfinite(lat_g), lat_g, 0.0) * G * (-1.0 if mirror else 1.0)
-        rate = np.where(v > 2.0, a / np.maximum(v, 2.0), 0.0)  # rad/s, ignored when nearly stopped
-        h = np.cumsum(rate * dt)
-        x = np.cumsum(v * np.sin(h) * dt)
-        y = np.cumsum(v * np.cos(h) * dt)
-        return _finish(t, x, y, "lateral g")
+        return _dead_reckon(t, v, dt, lat_g, mirror, bounds)
     raise ValueError("The log has no GPS position, GPS course or lateral g to build a track from")
+
+
+def lateral_bias(t: np.ndarray, v: np.ndarray, lat_g: np.ndarray) -> tuple[float, str]:
+    """Sensor offset in g, and how it was found: "standing", "straights" or "none".
+
+    The best evidence is what the accelerometer reads while the car stands still (LAT_STILL_MIN_S or
+    more). Without that, the most common reading while moving is taken, but only if it is clearly the
+    one the car spends much of its time at (straights) and is small enough to be an offset rather
+    than a long corner. A median over the whole drive is not used: on a track that mostly turns one
+    way it would cancel real cornering.
+    """
+    finite = np.isfinite(lat_g)
+    dt = float(np.median(np.diff(t))) if t.size > 1 else 0.0
+    still = (v < LAT_STILL_MPS) & finite
+    if still.sum() >= 20 and still.sum() * dt >= LAT_STILL_MIN_S:
+        return float(np.median(lat_g[still])), "standing"
+    moving = finite & (v > 3.0)
+    if moving.sum() >= 200:
+        s = _smooth(np.where(finite, lat_g, 0.0), t, LAT_SMOOTH_S)[moving]
+        counts, edges = np.histogram(s, bins=np.arange(-LAT_BIAS_MAX_G, LAT_BIAS_MAX_G + 0.0001, 0.01))
+        mode = float(edges[np.argmax(counts)] + 0.005)
+        near = np.abs(s - mode) <= LAT_STRAIGHT_BAND_G
+        if near.mean() >= LAT_STRAIGHT_SHARE:
+            return float(np.median(s[near])), "straights"
+    return 0.0, "none"
+
+
+def _smooth(a: np.ndarray, t: np.ndarray, seconds: float) -> np.ndarray:
+    """Moving average over about ``seconds`` (edges use the samples that exist)."""
+    dt = np.median(np.diff(t)) if t.size > 1 else 0.0
+    n = int(round(seconds / dt)) if dt > 0 else 1
+    if n <= 1:
+        return a
+    c = np.concatenate([[0.0], np.cumsum(a)])
+    lo = np.clip(np.arange(a.size) - n // 2, 0, a.size)
+    hi = np.clip(np.arange(a.size) + n - n // 2, 0, a.size)
+    return (c[hi] - c[lo]) / np.maximum(hi - lo, 1)
+
+
+def _lap_slices(t: np.ndarray, bounds: list[float] | None) -> list[slice]:
+    if not bounds or len(bounds) < 2:
+        return []
+    i = np.searchsorted(t, np.asarray(sorted(bounds)))
+    return [slice(int(a), int(b)) for a, b in zip(i[:-1], i[1:]) if b - a > 3]
+
+
+def _dead_reckon(
+    t: np.ndarray, v: np.ndarray, dt: np.ndarray, lat_g: np.ndarray, mirror: bool, bounds: list[float] | None
+) -> dict:
+    """Plan view from speed and sideways g, tidied as far as the data allows.
+
+    Turning rate is sideways acceleration over speed. Four things keep that from spiralling away:
+    the standing-still offset is taken off, vibration is averaged out, small readings on a straight
+    are not allowed to curve the path, and when the log has laps the turning is scaled so each lap
+    turns through one full circuit, the leftover heading error is spread over the lap, and the gap
+    between where a lap starts and ends is closed in proportion to distance.
+    """
+    bias, bias_from = lateral_bias(t, v, lat_g)
+    g = np.where(np.isfinite(lat_g), lat_g - bias, 0.0)
+    g = _smooth(g, t, LAT_SMOOTH_S)
+    g = np.where(np.abs(g) < LAT_DEADBAND_G, 0.0, g)
+    a = g * G * (-1.0 if mirror else 1.0)
+    rate = np.where(v > 2.0, a / np.maximum(v, 2.0), 0.0)  # rad/s, ignored when nearly stopped
+
+    slices = _lap_slices(t, bounds)
+    turns = [float(np.sum(rate[s] * dt[s])) for s in slices]
+    loops = [i for i, h in enumerate(turns) if LOOP_MIN * 2 * np.pi <= abs(h) <= LOOP_MAX * 2 * np.pi]
+    gain = 1.0
+    if loops:
+        gain = float(np.median([2 * np.pi / abs(turns[i]) for i in loops]))
+        rate = rate * gain
+        for i in loops:  # what is left after the scaling is drift: spread it evenly over the lap
+            s = slices[i]
+            span = float(np.sum(dt[s]))
+            if span > 0:
+                rate[s] -= (float(np.sum(rate[s] * dt[s])) - np.sign(turns[i]) * 2 * np.pi) / span
+
+    h = np.cumsum(rate * dt)
+    turned = float(np.degrees(h.max() - h.min()))
+    if turned < TURN_MIN_DEG:
+        raise ValueError(
+            f"The car turned through only {turned:.0f} degrees, so there is no track shape to draw. "
+            "Dyno, bench and straight-line runs have none."
+        )
+    dx, dy = v * np.sin(h) * dt, v * np.cos(h) * dt
+    step = v * dt
+    for i in loops:  # a lap starts and ends on the same line, so close the gap in proportion to distance
+        s = slices[i]
+        length = float(step[s].sum())
+        if length > 0:
+            dx[s] -= dx[s].sum() * step[s] / length
+            dy[s] -= dy[s].sum() * step[s] / length
+    out = _finish(t, np.cumsum(dx), np.cumsum(dy), "lateral g")
+    out.update(
+        turned_deg=turned,
+        closed_laps=len(loops),
+        bias_g=bias,
+        bias_from=bias_from,
+        gain=gain,
+    )
+    return out
 
 
 def pd_ffill(a: np.ndarray) -> np.ndarray:
