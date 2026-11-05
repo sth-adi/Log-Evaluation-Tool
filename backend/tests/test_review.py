@@ -524,3 +524,85 @@ def test_every_place_says_in_plain_words_what_is_wrong_there():
     # a sensor leaving its twins
     why = kinds(review.evaluate(_tie_logs(wrong=("b", 30, 34, 0.3))), "tie")[0]["occurrences"][0]["why"]
     assert "kept agreeing" in why and why.startswith("b was up to")
+
+
+# --- dead inputs -------------------------------------------------------------------------------
+
+
+def _sensor_log(seed, extra):
+    lg = make_log(seed, standing_at=(), moving_at=())
+    lg.cols.update(extra(lg))
+    return lg
+
+
+def test_a_wheel_speed_that_never_moves_while_its_sibling_does_is_a_dead_input():
+    wheels = lambda lg: {"rlSpeed": np.where(lg.t < 8, 0.0, 40 + 30 * np.sin(lg.t / 3)), "rrSpeed": np.zeros(lg.n), "flSpeed": np.zeros(lg.n)}
+    out = review.evaluate([_sensor_log(1, wheels), _sensor_log(2, wheels)])
+    f = {x["key"]: x for x in kinds(out, "sensor")}
+    assert set(f) == {"dead:rrSpeed", "dead:flSpeed"}
+    assert f["dead:rrSpeed"]["channels"] == ["rlSpeed", "rrSpeed"] and f["dead:rrSpeed"]["count"] == 2
+    assert "rlSpeed reached" in f["dead:rrSpeed"]["occurrences"][0]["why"] and "not connected" in f["dead:rrSpeed"]["occurrences"][0]["why"]
+
+
+def test_a_flat_channel_with_no_moving_sibling_is_not_called_dead():
+    flat = lambda lg: {"rrSpeed": np.zeros(lg.n), "flSpeed": np.zeros(lg.n)}  # nothing at any corner moves
+    assert kinds(review.evaluate([_sensor_log(1, flat), _sensor_log(2, flat)]), "sensor") == []
+
+
+def test_a_sibling_that_moves_in_some_logs_is_left_to_the_stuck_check():
+    def wheels(lg):
+        return {"rlSpeed": 40 + 30 * np.sin(lg.t / 3), "rrSpeed": 40 + 30 * np.sin(lg.t / 3) if lg.id == "l1" else np.zeros(lg.n)}
+
+    out = review.evaluate([_sensor_log(1, wheels), _sensor_log(2, wheels)])
+    assert kinds(out, "sensor") == [] and [x["key"] for x in kinds(out, "stuck")] == ["stuck:rrSpeed"]
+
+
+def _coolant(lg, zero=None, name="ect"):
+    rng = np.random.default_rng(lg.n)
+    x = 85 + 5 * np.sin(lg.t / 7) + rng.normal(0, 0.3, lg.n)
+    for a, b in zero or []:
+        x[int(a * RATE) : int(b * RATE)] = 0.0
+    return {name: x}
+
+
+def test_a_reading_of_exactly_zero_in_a_channel_that_is_never_near_zero_is_flagged():
+    out = review.evaluate([_sensor_log(1, _coolant), _sensor_log(2, lambda lg: _coolant(lg, [(30, 31.5)]))])
+    f = kinds(out, "sensor")
+    assert [x["key"] for x in f] == ["zero:ect"] and f[0]["count"] == 1
+    why = f[0]["occurrences"][0]["why"]
+    assert "exactly 0 for 1.5 s" in why and "between about" in why
+    assert 29.5 < f[0]["occurrences"][0]["t0"] < 31 and f[0]["occurrences"][0]["log_id"] == "l2"
+
+
+def test_a_subsystem_switching_off_together_is_not_a_sensor_failure():
+    def fuel(lg):
+        out = {}
+        for n in ("fuelDuty", "fuelFinal", "fuelFinalCyl1"):
+            out.update(_coolant(lg, [(30, 31.5)], n))
+        return out
+
+    assert kinds(review.evaluate([_sensor_log(1, fuel), _sensor_log(2, fuel)]), "sensor") == []
+
+
+def test_unrelated_channels_going_to_zero_together_point_to_a_shared_supply():
+    def both(lg):
+        return {**_coolant(lg, [(30, 31.5)], "ect"), **_coolant(lg, [(30, 31.5)], "oilPressure")}
+
+    out = review.evaluate([_sensor_log(1, both), _sensor_log(2, both)])
+    f = {x["key"]: x for x in kinds(out, "sensor")}
+    assert set(f) == {"zero:ect", "zero:oilPressure"}
+    assert "shared supply" in f["zero:ect"]["occurrences"][0]["why"]
+
+
+def test_a_channel_that_normally_sits_near_zero_is_not_a_zero_fault():
+    def throttle(lg):
+        rng = np.random.default_rng(1)
+        x = np.clip(rng.normal(5, 8, lg.n), 0, None)  # a throttle: often at or near zero
+        return {"tpsX": x}
+
+    assert kinds(review.evaluate([_sensor_log(1, throttle), _sensor_log(2, throttle)]), "sensor") == []
+
+
+def test_zero_before_the_sensor_wakes_up_at_the_start_of_a_log_is_not_flagged():
+    out = review.evaluate([_sensor_log(1, _coolant), _sensor_log(2, lambda lg: _coolant(lg, [(0, 2)]))])
+    assert kinds(out, "sensor") == []

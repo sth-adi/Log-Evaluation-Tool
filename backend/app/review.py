@@ -16,6 +16,9 @@ across the logs, not for values past a limit someone typed in:
   where a gear holds steady, then every moment is checked: does the gear channel say the gear that
   the rpm and speed fit, or another, or none?
 * **stuck sensors**: a channel that moves in other logs but is flat for a whole run.
+* **dead inputs**: a channel that never moves in any log although its siblings (the other wheels, the
+  other side) do, and a channel that reads exactly zero while the engine runs although it is never
+  near zero otherwise (an open or shorted wire looks like this).
 * **dropouts**: channels or whole logs that go quiet for a while.
 
 Limits for physical things (oil pressure, coolant temperature) are the one thing a person sets;
@@ -81,6 +84,13 @@ SPEED = re.compile(r"^vehicleSpeed$", re.I)
 NEUTRAL = re.compile(r"neutral|^n$", re.I)
 TIE_ODD = 0.6  # one channel is the odd one out when it breaks with this share of its partners
 MAX_TIE_FINDINGS = 8
+POSITION_WORDS = {"fl", "fr", "rl", "rr", "lf", "rf", "lr", "left", "right", "front", "rear"}
+WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+DEAD_MIN_S = 3.0  # a sibling must have moved, and this one stayed put, for this long while the engine ran
+ZERO_MIN_S = 0.3  # a reading of exactly zero this long counts
+ZERO_MAX_SHARE = 0.30  # ... if it is not zero more than this share of the running time
+ZERO_NEAR = 0.25  # ... and the rest of the time it stays above this fraction of its usual level
+MAX_SENSOR_FINDINGS = 12
 
 SELF_REPORT = re.compile(r"fault|fail|limp|warn|alarm|diag", re.I)
 SERIOUS = re.compile(r"fault|fail|limp", re.I)
@@ -648,6 +658,153 @@ def find_stuck(logs: list[Log]) -> list[dict]:
                 )
             )
     return findings
+
+
+def _stem(name: str) -> str | None:
+    """The channel's name without the word that says which corner or side it is (flSpeed -> speed), or None
+    if it has no such word."""
+    words = WORDS.findall(name)
+    kept = [w.lower() for w in words if w.lower() not in POSITION_WORDS]
+    if len(kept) == len(words) or not kept:
+        return None
+    return "".join(kept)
+
+
+def find_dead_inputs(logs: list[Log]) -> list[dict]:
+    """Inputs that never move although the channels they pair with do, or that read exactly zero for a
+    stretch while the engine runs although they are never near zero otherwise."""
+    findings: list[dict] = []
+    names = sorted({c for l in logs for c in l.cols})
+
+    def flat_everywhere(ch: str) -> bool:
+        have = [l for l in logs if ch in l.cols and np.isfinite(l.cols[ch]).any()]
+        return bool(have) and all(np.ptp(_finite(l.cols[ch])) == 0 for l in have)
+
+    def moves(l: Log, ch: str) -> bool:
+        return ch in l.cols and np.unique(_finite(l.cols[ch])).size > MAX_LEVELS
+
+    # 1. never moves, while the same kind of channel at another corner or side does
+    families: dict[str, list[str]] = {}
+    for ch in names:
+        stem = _stem(ch)
+        if stem:
+            families.setdefault(stem, []).append(ch)
+    for stem, members in sorted(families.items()):
+        live = [c for c in members if any(moves(l, c) for l in logs)]
+        dead = [c for c in members if flat_everywhere(c)]
+        if not live or not dead:
+            continue
+        for ch in dead:
+            occs = []
+            for l in logs:
+                if ch not in l.cols:
+                    continue
+                run = l.running()
+                best = max((c for c in live if moves(l, c)), key=lambda c: float(np.nanmax(l.cols[c])), default=None)
+                if best is None or run.sum() < DEAD_MIN_S * l.rate:
+                    continue
+                idx = np.flatnonzero(run)
+                top = float(np.nanmax(l.cols[best][run]))
+                val = float(_finite(l.cols[ch])[0])
+                unit = l.unit(best)
+                occs.append(
+                    _occ(
+                        l,
+                        int(idx[0]),
+                        int(idx[-1]) + 1,
+                        f"{ch} stayed at {_num(val)} while {best} reached {_num(top)}",
+                        f"{ch} read {_num(val)} the whole time the engine ran, while {best} reached {_num(top)}{' ' + unit if unit else ''}. "
+                        f"The same kind of channel moves there, so this input is probably not connected or not fitted.",
+                    )
+                )
+            if occs:
+                findings.append(
+                    _finding(
+                        key=f"dead:{ch}",
+                        kind="sensor",
+                        severity="medium",
+                        title=f"{ch} never moves, but {', '.join(live[:3])} {'does' if len(live) == 1 else 'do'}",
+                        detail=(
+                            f"{ch} is flat in every log while the matching {'channel' if len(live) == 1 else 'channels'} {', '.join(live[:3])} "
+                            "move. An input that is not wired or not fitted looks like this. Anything calculated from it (slip, differences between sides) "
+                            "is not usable."
+                        ),
+                        channels=[live[0], ch],
+                        occurrences=occs,
+                    )
+                )
+
+    # 2. exactly zero for a while although it is never near zero otherwise
+    cands: list[dict] = []
+    for ch in names:
+        have = [l for l in logs if ch in l.cols]
+        if flat_everywhere(ch) or _discrete(logs, ch) or any(np.unique(_finite(l.cols[ch])).size <= MAX_LEVELS for l in have):
+            continue
+        pool = np.concatenate([_finite(l.cols[ch][l.running() & np.isfinite(l.cols[ch])]) for l in have])
+        if pool.size < 50:
+            continue
+        nonzero = pool[pool != 0]
+        share = float((pool == 0).mean())
+        if nonzero.size == 0 or share > ZERO_MAX_SHARE or share == 0:
+            continue
+        typical = float(np.median(nonzero))
+        if typical <= 0 or float(np.percentile(nonzero, 1)) < ZERO_NEAR * typical:
+            continue  # it comes near zero in normal running, or it is a signed channel
+        lo, hi = float(np.percentile(nonzero, 1)), float(np.percentile(nonzero, 99))
+        for l in have:
+            zero = (l.cols[ch] == 0) & l.running()
+            for i0, i1 in _merge(_runs(zero), int(0.1 * l.rate)):
+                d = float(l.t[min(i1, l.n - 1)] - l.t[i0])
+                if d >= ZERO_MIN_S and l.t[i0] - l.t[0] > SETTLE_S and l.t[-1] - l.t[min(i1, l.n - 1)] > SETTLE_S:  # not start-up or shut-down
+                    cands.append({"ch": ch, "log": l, "i0": i0, "i1": i1, "d": d, "lo": lo, "hi": hi})
+
+    def first_word(name: str) -> str:
+        w = WORDS.findall(name)
+        return w[0].lower() if w else name.lower()
+
+    def same_time(x: dict, y: dict) -> bool:
+        if x["log"] is not y["log"]:
+            return False
+        over = min(x["i1"], y["i1"]) - max(x["i0"], y["i0"])
+        return over >= 0.5 * min(x["i1"] - x["i0"], y["i1"] - y["i0"])
+
+    by_ch: dict[str, list[dict]] = {}
+    for c in cands:
+        mates = [m for m in cands if m is not c and m["ch"] != c["ch"] and same_time(c, m)]
+        # a whole subsystem switching off at once (fuel cut on a closed throttle) is the car doing something,
+        # not a sensor failing: one failed input drops alone, or takes unrelated ones with it
+        if mates and {first_word(m["ch"]) for m in mates} | {first_word(c["ch"])} == {first_word(c["ch"])}:
+            continue
+        c["mates"] = sorted({m["ch"] for m in mates})
+        by_ch.setdefault(c["ch"], []).append(c)
+    for ch, group in sorted(by_ch.items()):
+        occs = []
+        for c in group:
+            l, unit = c["log"], c["log"].unit(ch)
+            together = f" {len(c['mates'])} other channel{'s' if len(c['mates']) > 1 else ''} ({', '.join(c['mates'][:3])}) read zero at the same moment, which points to a shared supply or ground rather than one sensor." if c["mates"] else ""
+            occs.append(
+                _occ(
+                    l,
+                    c["i0"],
+                    c["i1"],
+                    f"{ch} read exactly 0 for {c['d']:.1f} s",
+                    f"{ch} read exactly 0 for {c['d']:.1f} s while the engine ran. Otherwise it stays between about {_num(c['lo'])} and {_num(c['hi'])}"
+                    f"{' ' + unit if unit else ''}. An open or shorted wire reads like this, and so can a real loss of whatever it measures.{together}",
+                )
+            )
+        findings.append(
+            _finding(
+                key=f"zero:{ch}",
+                kind="sensor",
+                severity="medium",
+                title=f"{ch} dropped to exactly zero while the engine ran",
+                detail="It is never near zero in the rest of the running time, so a reading of exactly zero is either a failed sensor or wiring, or a real loss.",
+                channels=[ch],
+                occurrences=occs,
+            )
+        )
+    findings.sort(key=lambda f: f["key"])
+    return findings[:MAX_SENSOR_FINDINGS]
 
 
 def find_unused(logs: list[Log]) -> list[dict]:
@@ -1224,7 +1381,7 @@ def evaluate(logs: list[Log], limits: list[dict] | None = None) -> dict:
         notes.append("No rpm channel, so every sample counts as engine running.")
     if len(logs) < 2:
         notes.append("Only one log is open. Checks that compare logs (stuck sensors, links) get stronger with more.")
-    for check in (find_links, find_self_reports, find_drift, find_ties, find_gear_fit, find_stuck, find_unused, find_dropouts):
+    for check in (find_links, find_self_reports, find_drift, find_ties, find_gear_fit, find_stuck, find_dead_inputs, find_unused, find_dropouts):
         findings += check(logs)
     lim, lim_notes = find_limit_breaches(logs, limits or [])
     findings += lim
