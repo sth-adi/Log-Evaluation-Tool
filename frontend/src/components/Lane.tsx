@@ -283,6 +283,20 @@ export function Lane({ lane, colorOffset, isLast }: Props) {
               }
               close(x.length - 1);
             });
+            // the bands paint over the shading drawn underneath, so mark the finding's stretch again on top
+            const fr = focusRef.current?.range;
+            if (fr) {
+              const a = Math.max(u.valToPos(fr[0], "x", true), left);
+              const b = Math.min(u.valToPos(fr[1], "x", true), left + width);
+              if (b >= left && a <= left + width) {
+                const w = Math.max(b - a, 2 * dpr);
+                ctx.fillStyle = "rgba(229, 57, 69, 0.22)";
+                ctx.fillRect(a, top, w, height);
+                ctx.fillStyle = "#e53945";
+                ctx.fillRect(a, top, 2 * dpr, height);
+                ctx.fillRect(a + w - 2 * dpr, top, 2 * dpr, height);
+              }
+            }
             ctx.restore();
           },
           (u) => {
