@@ -193,7 +193,7 @@ export default function App() {
         ) : !hasLogs ? (
           <div className="empty">
             <h2>Drop your logs here</h2>
-            <p>Life Racing .LRD logs, or CSV, Excel, Parquet, MDF (.mf4) and CAN (.asc, .blf) files. Everything stays on this computer.</p>
+            <p>Life Racing .LRD logs, or CSV, Excel, Parquet, MDF (.mf4) and CAN (.asc, .blf) files. {team?.team ? "They are kept on the team PC." : "Everything stays on this computer."}</p>
             <ImportButton className="btn primary lg">Choose files</ImportButton>
             {library.length > 0 && (
               <button className="btn lg" onClick={() => setLibraryOpen(true)}>

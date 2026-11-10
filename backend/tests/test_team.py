@@ -178,3 +178,28 @@ def test_pc_only_actions_stay_on_the_pc_for_everyone(env):
 def test_team_mode_off_means_no_sign_in(env, monkeypatch):
     monkeypatch.delenv("LET_TEAM")
     assert remote().post("/api/team/login", json={"name": "x", "password": PW}).status_code in (403, 404)
+
+
+# --- who added a log ---------------------------------------------------------------------------
+
+
+def _csv(name="2025-11-19 10-00-00 plus 0h00m00s t.csv", scale=1.0):
+    import io
+
+    rows = "Time,rpm\n" + "\n".join(f"{i / 10:.1f},{1000 * scale + i}" for i in range(50))
+    return {"file": (name, io.BytesIO(rows.encode()), "text/csv")}
+
+
+def test_a_log_remembers_who_added_it_in_team_mode(env):
+    make()
+    c, _ = sign_in()
+    assert c.post("/api/sources", files=_csv()).status_code == 200
+    assert pc().post("/api/sources", files=_csv("2025-11-19 11-00-00 plus 0h00m00s t.csv", scale=2.0)).status_code == 200
+    who = {e["label"][:13]: e["added_by"] for e in pc().get("/api/library").json()}
+    assert who == {"2025-11-19 10": "sam", "2025-11-19 11": "this PC"}
+
+
+def test_nothing_is_recorded_when_team_mode_is_off(env, monkeypatch):
+    monkeypatch.delenv("LET_TEAM")
+    assert pc().post("/api/sources", files=_csv()).status_code == 200
+    assert [e["added_by"] for e in pc().get("/api/library").json()] == [None]

@@ -104,6 +104,7 @@ export function Library() {
                     </div>
                     <span className="lib-meta">
                       {dur(e.duration_s)}, {e.channels} channels, {size(e.size_bytes)}
+                      {e.added_by ? `, added by ${e.added_by}` : ""}
                     </span>
                     <span className="lib-act">
                       {e.open ? (

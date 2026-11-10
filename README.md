@@ -20,7 +20,7 @@ Double-click **`Log Evaluation Tool.bat`** (there is also a shortcut on the Desk
 
 ## Team accounts
 
-One PC holds the library and the others open it in their browser, each with their own login. Start it with **`Log Evaluation Tool (team).bat`** on the PC that will hold the logs (keep it switched on). Under **More > Team** make an account for each person: a name, a password of 10 or more characters, and whether they can make accounts too. Teammates open the PC's address (shown under **More > Open on phone**) and sign in. They see the same logs, views, limits and findings, and anything they import is kept on that PC, so one backup of its library folder covers everyone.
+One PC holds the library and the others open it in their browser, each with their own login. Start it with **`Log Evaluation Tool (team).bat`** on the PC that will hold the logs (keep it switched on). Under **More > Team** make an account for each person: a name, a password of 10 or more characters, and whether they can make accounts too. Teammates open the PC's address (shown under **More > Open on phone**) and sign in. They see the same logs, views, limits and findings, and anything they import is kept on that PC (the Logs list says who added each one), so one backup of its library folder covers everyone.
 
 - The PC itself needs no sign-in and is always an administrator. Everyone else sees only a sign-in page until they have an account.
 - Passwords are stored as scrypt hashes. Five wrong tries lock that name from that address for 15 minutes. A sign-in lasts 30 days and ends when the account is deleted or its password changes.

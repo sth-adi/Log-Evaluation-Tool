@@ -43,6 +43,7 @@ export type LibraryEntry = {
   channels: number;
   open: boolean;
   from_lrd: boolean;
+  added_by?: string | null; // who imported it, when team accounts are on
   size_bytes: number;
 };
 

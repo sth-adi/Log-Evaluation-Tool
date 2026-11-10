@@ -49,6 +49,7 @@ def health(request: Request) -> dict:
 
 @app.post("/api/sources")
 async def import_source(
+    request: Request,
     file: UploadFile = File(...),
     label: str = Form(""),
     kind: str = Form("other"),
@@ -78,7 +79,9 @@ async def import_source(
             if not existing.get("open", True):
                 existing = store.update_source(existing["id"], open=True)
             return {**existing, "reused": True}
-    return store.create_source(parsed.df, parsed.meta, label or Path(name).stem, kind, name)
+    who = team.current(request) if team.enabled() else None
+    extra = {"added_by": who["name"]} if who else None  # in team mode, remember who added it
+    return store.create_source(parsed.df, parsed.meta, label or Path(name).stem, kind, name, extra)
 
 
 @app.get("/api/convert/status")

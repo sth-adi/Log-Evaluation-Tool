@@ -228,6 +228,7 @@ def library() -> list[dict]:
                 "channels": len(rec["channels"]),
                 "open": rec.get("open", True),
                 "from_lrd": bool(rec.get("lrd_sha")),
+                "added_by": rec.get("added_by"),
                 "size_bytes": pq.stat().st_size if pq.exists() else 0,
             }
         )
