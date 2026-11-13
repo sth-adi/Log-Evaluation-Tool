@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import access, analysis, can_import, laps, lifeview, live, pulls, report, review, store, summary, team, workspaces
+from . import access, analysis, briefing, can_import, laps, lifeview, live, pulls, report, review, store, summary, team, workspaces
 from .downsample import minmax_downsample
 from .derived import FormulaError
 from .importer import ImportErrorDetail, parse_any
@@ -429,6 +429,15 @@ class LimitsBody(BaseModel):
 @app.get("/api/review")
 def get_review() -> dict:
     return review.run()
+
+
+@app.post("/api/review/briefing")
+def review_briefing() -> dict:
+    """A few plain sentences about the open findings, written by a Groq model from the findings only."""
+    try:
+        return briefing.brief(review.run())
+    except briefing.BriefingError as e:
+        raise HTTPException(502, str(e)) from e
 
 
 @app.get("/api/review/report", response_class=HTMLResponse)

@@ -384,6 +384,10 @@ export const api = {
     }>(`/api/sources/${id}/spectrum`, { channel, t0, t1 }),
 
   review: () => getJson<Review>("/api/review", {}),
+  briefing: () =>
+    fetch("/api/review/briefing", { method: "POST" }).then((r) =>
+      parse<{ text: string; model: string | null; findings: number }>(r),
+    ),
   muteFinding: (key: string) =>
     fetch(`/api/review/mute?${new URLSearchParams({ key })}`, { method: "POST" }).then((r) => parse<Review>(r)),
   restoreFinding: (key: string) =>

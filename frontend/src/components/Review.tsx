@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { api } from "../api";
 import type { Finding, Limit, Severity } from "../api";
 import { useStore } from "../store";
 import { shortLabel } from "./LogRail";
@@ -9,6 +10,20 @@ const SHOWN = 4;
 /** What the checks found in the open logs, without anything having to be set up first. */
 export function Review() {
   const review = useStore((s) => s.review);
+  const [brief, setBrief] = useState<{ text: string; model: string | null } | null>(null);
+  const [briefing, setBriefing] = useState(false);
+  const [briefError, setBriefError] = useState("");
+  const ask = async () => {
+    setBriefing(true);
+    setBriefError("");
+    try {
+      setBrief(await api.briefing());
+    } catch (e) {
+      setBriefError(e instanceof Error ? e.message : "The briefing failed.");
+    } finally {
+      setBriefing(false);
+    }
+  };
   if (!review) return <section className="review"><p className="muted">Checking the logs…</p></section>;
 
   const attention = review.findings.filter((f) => f.severity !== "low");
@@ -31,6 +46,15 @@ export function Review() {
         <a className="btn sm" href="/api/review/report" target="_blank" rel="noreferrer" title="One page with every finding and a plot of each, to print or send">
           Open as a report
         </a>
+        <button className="btn sm" disabled={briefing} onClick={() => void ask()} title="Sends only the finding titles and details to Groq, not the log data">
+          {briefing ? "Writing…" : "Explain in words"}
+        </button>
+        {brief && (
+          <p className="finding-detail">
+            {brief.text} {brief.model && <span className="hint">Written by {brief.model} from the findings above.</span>}
+          </p>
+        )}
+        {briefError && <p className="hint">{briefError}</p>}
       </header>
 
       {attention.map((f) => (
